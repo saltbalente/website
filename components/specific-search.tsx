@@ -7,16 +7,76 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { fetchDataByZipCode, fetchLocationSpecificData } from "@/lib/census-api"
 
+// Lista de estados de EE.UU. con sus códigos
+const US_STATES = [
+  { name: "Alabama", code: "01" },
+  { name: "Alaska", code: "02" },
+  { name: "Arizona", code: "04" },
+  { name: "Arkansas", code: "05" },
+  { name: "California", code: "06" },
+  { name: "Colorado", code: "08" },
+  { name: "Connecticut", code: "09" },
+  { name: "Delaware", code: "10" },
+  { name: "District of Columbia", code: "11" },
+  { name: "Florida", code: "12" },
+  { name: "Georgia", code: "13" },
+  { name: "Hawaii", code: "15" },
+  { name: "Idaho", code: "16" },
+  { name: "Illinois", code: "17" },
+  { name: "Indiana", code: "18" },
+  { name: "Iowa", code: "19" },
+  { name: "Kansas", code: "20" },
+  { name: "Kentucky", code: "21" },
+  { name: "Louisiana", code: "22" },
+  { name: "Maine", code: "23" },
+  { name: "Maryland", code: "24" },
+  { name: "Massachusetts", code: "25" },
+  { name: "Michigan", code: "26" },
+  { name: "Minnesota", code: "27" },
+  { name: "Mississippi", code: "28" },
+  { name: "Missouri", code: "29" },
+  { name: "Montana", code: "30" },
+  { name: "Nebraska", code: "31" },
+  { name: "Nevada", code: "32" },
+  { name: "New Hampshire", code: "33" },
+  { name: "New Jersey", code: "34" },
+  { name: "New Mexico", code: "35" },
+  { name: "New York", code: "36" },
+  { name: "North Carolina", code: "37" },
+  { name: "North Dakota", code: "38" },
+  { name: "Ohio", code: "39" },
+  { name: "Oklahoma", code: "40" },
+  { name: "Oregon", code: "41" },
+  { name: "Pennsylvania", code: "42" },
+  { name: "Rhode Island", code: "44" },
+  { name: "South Carolina", code: "45" },
+  { name: "South Dakota", code: "46" },
+  { name: "Tennessee", code: "47" },
+  { name: "Texas", code: "48" },
+  { name: "Utah", code: "49" },
+  { name: "Vermont", code: "50" },
+  { name: "Virginia", code: "51" },
+  { name: "Washington", code: "53" },
+  { name: "West Virginia", code: "54" },
+  { name: "Wisconsin", code: "55" },
+  { name: "Wyoming", code: "56" },
+]
+
 export function SpecificSearch() {
-  const [searchType, setSearchType] = useState<"zipcode" | "location" | "city">("zipcode")
+  const [searchType, setSearchType] = useState<"zipcode" | "location" | "city" | "state">("zipcode")
   const [zipCode, setZipCode] = useState("")
   const [stateCode, setStateCode] = useState("")
   const [placeId, setPlaceId] = useState("")
   const [cityName, setCityName] = useState("")
+  const [selectedState, setSelectedState] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [searchResults, setSearchResults] = useState<any>(null)
+  const [stateCitiesResults, setStateCitiesResults] = useState<any[]>([])
+  const [selectedCityData, setSelectedCityData] = useState<any>(null)
   const [error, setError] = useState<string | null>(null)
   const [showRawData, setShowRawData] = useState(false)
 
@@ -161,14 +221,98 @@ export function SpecificSearch() {
     }
   }
 
+  const searchCitiesByState = async (stateCode: string): Promise<any[]> => {
+    if (!stateCode) {
+      throw new Error("Por favor, selecciona un estado")
+    }
+
+    const API_KEY = localStorage.getItem("census_api_key") || process.env.CENSUS_API_KEY
+
+    if (!API_KEY) {
+      throw new Error("Census API key is not available")
+    }
+
+    try {
+      const baseUrl = "https://api.census.gov/data/2021/acs/acs5"
+
+      // Construir la URL para buscar datos específicos
+      // Usamos variables básicas para minimizar errores
+      const variables = [
+        "B03001_001E", // Total population
+        "B03001_004E", // Mexican population
+        "B19013_001E", // Median household income
+      ].join(",")
+
+      // Buscar todas las ciudades del estado seleccionado
+      const searchUrl = `${baseUrl}?get=${variables},NAME&for=place:*&in=state:${stateCode}&key=${API_KEY}`
+
+      const response = await fetch(searchUrl)
+
+      if (!response.ok) {
+        throw new Error(`Error en la API del Census: ${response.status} ${response.statusText}`)
+      }
+
+      const data = await response.json()
+
+      // Procesar los resultados
+      const headers = data[0]
+      const nameIndex = headers.indexOf("NAME")
+      const totalPopIndex = headers.indexOf("B03001_001E")
+      const mexicanPopIndex = headers.indexOf("B03001_004E")
+      const incomeIndex = headers.indexOf("B19013_001E")
+      const placeIndex = headers.indexOf("place")
+
+      // Filtrar y procesar los datos
+      const processedData = data
+        .slice(1) // Omitir encabezados
+        .map((row: any) => {
+          const fullName = row[nameIndex]
+          const placeName = fullName.split(",")[0]
+          const totalPopulation = Number.parseInt(row[totalPopIndex]) || 0
+          const mexicanPopulation = Number.parseInt(row[mexicanPopIndex]) || 0
+          const medianIncome = Number.parseInt(row[incomeIndex]) || 0
+          const placeId = row[placeIndex]
+
+          // Calcular porcentaje
+          const percentage =
+            totalPopulation > 0 ? Number.parseFloat(((mexicanPopulation / totalPopulation) * 100).toFixed(1)) : 0
+
+          return {
+            name: placeName,
+            stateCode,
+            placeId,
+            totalPopulation,
+            mexicanPopulation,
+            percentage,
+            medianIncome,
+          }
+        })
+        // Filtrar lugares con población mexicana
+        .filter((place) => place.mexicanPopulation > 0)
+        // Ordenar por población mexicana (de mayor a menor)
+        .sort((a, b) => b.mexicanPopulation - a.mexicanPopulation)
+        // Limitar a los 50 principales lugares para rendimiento
+        .slice(0, 50)
+
+      return processedData
+    } catch (error) {
+      console.error(`Error en la búsqueda de ciudades para el estado ${stateCode}:`, error)
+      throw new Error(
+        `No se pudieron obtener datos para el estado seleccionado. Error: ${
+          error instanceof Error ? error.message : "Error desconocido"
+        }`,
+      )
+    }
+  }
+
   const handleSearch = async () => {
     setIsLoading(true)
     setError(null)
     setSearchResults(null)
+    setStateCitiesResults([])
+    setSelectedCityData(null)
 
     try {
-      let results
-
       if (searchType === "zipcode") {
         if (!zipCode) {
           throw new Error("Por favor, ingresa un código postal")
@@ -178,13 +322,22 @@ export function SpecificSearch() {
           throw new Error("El código postal debe tener 5 dígitos numéricos (formato XXXXX)")
         }
 
-        results = await fetchDataByZipCode(zipCode)
+        const results = await fetchDataByZipCode(zipCode)
+        setSearchResults(results)
       } else if (searchType === "city") {
         if (!cityName) {
           throw new Error("Por favor, ingresa un nombre de ciudad")
         }
 
-        results = await searchByCity(cityName)
+        const results = await searchByCity(cityName)
+        setSearchResults(results)
+      } else if (searchType === "state") {
+        if (!selectedState) {
+          throw new Error("Por favor, selecciona un estado")
+        }
+
+        const cities = await searchCitiesByState(selectedState)
+        setStateCitiesResults(cities)
       } else {
         if (!stateCode) {
           throw new Error("Por favor, ingresa un código de estado")
@@ -202,13 +355,32 @@ export function SpecificSearch() {
           throw new Error("El ID de lugar debe contener solo dígitos numéricos")
         }
 
-        results = await fetchLocationSpecificData(stateCode, placeId)
+        const results = await fetchLocationSpecificData(stateCode, placeId)
+        setSearchResults(results)
       }
-
-      setSearchResults(results)
     } catch (error) {
       console.error("Error en la búsqueda:", error)
       setError(error instanceof Error ? error.message : "Error desconocido en la búsqueda")
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleCitySelect = async (city: any) => {
+    setIsLoading(true)
+    setError(null)
+    setSelectedCityData(null)
+
+    try {
+      const cityData = await fetchLocationSpecificData(city.stateCode, city.placeId)
+      setSelectedCityData(cityData)
+    } catch (error) {
+      console.error("Error al obtener datos detallados de la ciudad:", error)
+      setError(
+        `No se pudieron obtener datos detallados para ${city.name}. Error: ${
+          error instanceof Error ? error.message : "Error desconocido"
+        }`,
+      )
     } finally {
       setIsLoading(false)
     }
@@ -331,6 +503,148 @@ export function SpecificSearch() {
     )
   }
 
+  // Función para renderizar la tabla de ciudades por estado
+  const renderStateCitiesTable = () => {
+    if (stateCitiesResults.length === 0) return null
+
+    const stateName = US_STATES.find((state) => state.code === selectedState)?.name || "Seleccionado"
+
+    return (
+      <div className="mt-4">
+        <h3 className="font-medium text-lg mb-2">
+          Ciudades con población mexicana en {stateName} ({stateCitiesResults.length})
+        </h3>
+
+        <div className="rounded-md border overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Ciudad</TableHead>
+                <TableHead className="text-right">Población Mexicana</TableHead>
+                <TableHead className="text-right">% del Total</TableHead>
+                <TableHead className="text-right">Ingreso Medio</TableHead>
+                <TableHead></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {stateCitiesResults.map((city) => (
+                <TableRow key={`${city.stateCode}-${city.placeId}`}>
+                  <TableCell className="font-medium">{city.name}</TableCell>
+                  <TableCell className="text-right">{city.mexicanPopulation.toLocaleString()}</TableCell>
+                  <TableCell className="text-right">{city.percentage}%</TableCell>
+                  <TableCell className="text-right">${city.medianIncome.toLocaleString()}</TableCell>
+                  <TableCell className="text-right">
+                    <Button variant="outline" size="sm" onClick={() => handleCitySelect(city)} disabled={isLoading}>
+                      {isLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : "Ver detalles"}
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+
+        {selectedCityData && (
+          <div className="mt-6">
+            <h3 className="font-medium text-lg mb-2">Detalles de {selectedCityData["Nombre de la Ubicación"]}</h3>
+            {renderCityDetails(selectedCityData)}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // Función para renderizar los detalles de una ciudad seleccionada
+  const renderCityDetails = (cityData: any) => {
+    // Filtrar los datos originales si están presentes
+    const displayData = { ...cityData }
+    const rawData = displayData._datosOriginales
+    delete displayData._datosOriginales
+
+    // Agrupar los datos en categorías
+    const generalInfo = {}
+    const demographicInfo = {}
+    const economicInfo = {}
+    const educationInfo = {}
+
+    Object.entries(displayData).forEach(([key, value]) => {
+      if (
+        key.includes("Código") ||
+        key.includes("Año") ||
+        key.includes("Nombre") ||
+        key.includes("Estado") ||
+        key.includes("ID")
+      ) {
+        generalInfo[key] = value
+      } else if (key.includes("Población") || key.includes("Porcentaje Mexicano")) {
+        demographicInfo[key] = value
+      } else if (key.includes("Ingreso")) {
+        economicInfo[key] = value
+      } else if (key.includes("Educación") || key.includes("Licenciatura") || key.includes("Posgrado")) {
+        educationInfo[key] = value
+      }
+    })
+
+    return (
+      <Tabs defaultValue="general" className="w-full">
+        <TabsList className="grid grid-cols-4 mb-4">
+          <TabsTrigger value="general">General</TabsTrigger>
+          <TabsTrigger value="demographic">Demografía</TabsTrigger>
+          <TabsTrigger value="economic">Económico</TabsTrigger>
+          <TabsTrigger value="education">Educación</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="general" className="bg-gray-50 rounded-md p-4">
+          <h4 className="font-medium mb-2">Información General</h4>
+          <div className="space-y-2">
+            {Object.entries(generalInfo).map(([key, value]) => (
+              <div key={key} className="grid grid-cols-2 gap-2 text-sm">
+                <div className="font-medium">{key}:</div>
+                <div>{String(value)}</div>
+              </div>
+            ))}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="demographic" className="bg-gray-50 rounded-md p-4">
+          <h4 className="font-medium mb-2">Información Demográfica</h4>
+          <div className="space-y-2">
+            {Object.entries(demographicInfo).map(([key, value]) => (
+              <div key={key} className="grid grid-cols-2 gap-2 text-sm">
+                <div className="font-medium">{key}:</div>
+                <div>{String(value)}</div>
+              </div>
+            ))}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="economic" className="bg-gray-50 rounded-md p-4">
+          <h4 className="font-medium mb-2">Información Económica</h4>
+          <div className="space-y-2">
+            {Object.entries(economicInfo).map(([key, value]) => (
+              <div key={key} className="grid grid-cols-2 gap-2 text-sm">
+                <div className="font-medium">{key}:</div>
+                <div>{String(value)}</div>
+              </div>
+            ))}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="education" className="bg-gray-50 rounded-md p-4">
+          <h4 className="font-medium mb-2">Información Educativa</h4>
+          <div className="space-y-2">
+            {Object.entries(educationInfo).map(([key, value]) => (
+              <div key={key} className="grid grid-cols-2 gap-2 text-sm">
+                <div className="font-medium">{key}:</div>
+                <div>{String(value)}</div>
+              </div>
+            ))}
+          </div>
+        </TabsContent>
+      </Tabs>
+    )
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -338,19 +652,49 @@ export function SpecificSearch() {
         <CardDescription>Busca datos demográficos específicos por código postal o ubicación</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="flex gap-4">
+        <div className="flex flex-wrap gap-2">
           <Button variant={searchType === "zipcode" ? "default" : "outline"} onClick={() => setSearchType("zipcode")}>
             Código Postal
           </Button>
           <Button variant={searchType === "city" ? "default" : "outline"} onClick={() => setSearchType("city")}>
             Ciudad
           </Button>
+          <Button variant={searchType === "state" ? "default" : "outline"} onClick={() => setSearchType("state")}>
+            Estado
+          </Button>
           <Button variant={searchType === "location" ? "default" : "outline"} onClick={() => setSearchType("location")}>
             Ubicación Específica
           </Button>
         </div>
 
-        {searchType === "city" ? (
+        {searchType === "state" ? (
+          <div className="space-y-2">
+            <label htmlFor="state-select" className="text-sm font-medium">
+              Selecciona un Estado
+            </label>
+            <div className="flex gap-2">
+              <Select value={selectedState} onValueChange={setSelectedState}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Selecciona un estado" />
+                </SelectTrigger>
+                <SelectContent>
+                  {US_STATES.map((state) => (
+                    <SelectItem key={state.code} value={state.code}>
+                      {state.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button onClick={handleSearch} disabled={isLoading}>
+                {isLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Search className="h-4 w-4 mr-2" />}
+                Buscar
+              </Button>
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              Muestra todas las ciudades con población mexicana en el estado seleccionado
+            </p>
+          </div>
+        ) : searchType === "city" ? (
           <div className="space-y-2">
             <label htmlFor="cityname" className="text-sm font-medium">
               Nombre de Ciudad
@@ -437,17 +781,19 @@ export function SpecificSearch() {
         )}
 
         {searchResults && renderResults()}
+        {stateCitiesResults.length > 0 && renderStateCitiesTable()}
       </CardContent>
       <CardFooter className="flex flex-col items-start text-xs text-gray-500">
+        <p className="mb-1">
+          <strong>Estados con mayor población mexicana:</strong> California (06), Texas (48), Arizona (04), Illinois
+          (17)
+        </p>
         <p className="mb-1">
           <strong>Ejemplos de ciudades:</strong> Miami (FL), Los Angeles (CA), Chicago (IL), Houston (TX)
         </p>
         <p className="mb-1">
           <strong>Ejemplos de códigos postales válidos:</strong> 90022 (East Los Angeles, CA), 78501 (McAllen, TX),
           10001 (New York, NY)
-        </p>
-        <p>
-          <strong>Ejemplos de códigos de estado:</strong> 06 (California), 48 (Texas), 36 (New York), 12 (Florida)
         </p>
       </CardFooter>
     </Card>
