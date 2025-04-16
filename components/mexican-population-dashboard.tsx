@@ -17,6 +17,7 @@ import { SpecificSearch } from "@/components/specific-search"
 import { fetchPopulationData, applyDemographicFilters } from "@/lib/census-api"
 import type { LocationData } from "@/types/census"
 import { ApiKeyConfig } from "@/components/api-key-config"
+import { getBackupData } from "@/lib/backup-data"
 
 export function MexicanPopulationDashboard() {
   const [searchTerm, setSearchTerm] = useState("")
@@ -38,13 +39,29 @@ export function MexicanPopulationDashboard() {
     const loadInitialData = async () => {
       setIsLoading(true)
       try {
-        const data = await fetchPopulationData()
+        // Implementar un timeout para la carga de datos
+        const timeoutPromise = new Promise<LocationData[]>((_, reject) => {
+          setTimeout(() => reject(new Error("Timeout loading data")), 15000)
+        })
+
+        // Cargar datos con un timeout
+        const data = await Promise.race([fetchPopulationData(), timeoutPromise])
+
         setPopulationData(data)
         setFilteredData(data)
       } catch (error) {
         console.error("Error loading data:", error)
         // Mostrar un mensaje de error al usuario
         alert("Hubo un problema al cargar los datos del Census Bureau. Se mostrarán datos de respaldo.")
+
+        // Intentar cargar datos de respaldo
+        try {
+          const backupData = await getBackupData()
+          setPopulationData(backupData)
+          setFilteredData(backupData)
+        } catch (backupError) {
+          console.error("Error loading backup data:", backupError)
+        }
       } finally {
         setIsLoading(false)
       }

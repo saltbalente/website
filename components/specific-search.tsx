@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { fetchDataByZipCode, fetchLocationSpecificData } from "@/lib/census-api"
+import { NeighborhoodExplorer } from "@/components/neighborhood-explorer"
 
 // Lista de estados de EE.UU. con sus códigos
 const US_STATES = [
@@ -67,7 +68,7 @@ const US_STATES = [
 ]
 
 export function SpecificSearch() {
-  const [searchType, setSearchType] = useState<"zipcode" | "location" | "city" | "state">("zipcode")
+  const [searchType, setSearchType] = useState<"zipcode" | "location" | "city" | "state" | "neighborhood">("zipcode")
   const [zipCode, setZipCode] = useState("")
   const [stateCode, setStateCode] = useState("")
   const [placeId, setPlaceId] = useState("")
@@ -338,6 +339,9 @@ export function SpecificSearch() {
 
         const cities = await searchCitiesByState(selectedState)
         setStateCitiesResults(cities)
+      } else if (searchType === "neighborhood") {
+        // La búsqueda de barrios se maneja en el componente NeighborhoodExplorer
+        return
       } else {
         if (!stateCode) {
           throw new Error("Por favor, ingresa un código de estado")
@@ -662,12 +666,20 @@ export function SpecificSearch() {
           <Button variant={searchType === "state" ? "default" : "outline"} onClick={() => setSearchType("state")}>
             Estado
           </Button>
+          <Button
+            variant={searchType === "neighborhood" ? "default" : "outline"}
+            onClick={() => setSearchType("neighborhood")}
+          >
+            Barrios
+          </Button>
           <Button variant={searchType === "location" ? "default" : "outline"} onClick={() => setSearchType("location")}>
             Ubicación Específica
           </Button>
         </div>
 
-        {searchType === "state" ? (
+        {searchType === "neighborhood" ? (
+          <NeighborhoodExplorer />
+        ) : searchType === "state" ? (
           <div className="space-y-2">
             <label htmlFor="state-select" className="text-sm font-medium">
               Selecciona un Estado
