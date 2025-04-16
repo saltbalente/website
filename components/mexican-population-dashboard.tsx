@@ -16,6 +16,7 @@ import { DemographicDetails } from "@/components/demographic-details"
 import { SpecificSearch } from "@/components/specific-search"
 import { fetchPopulationData, applyDemographicFilters } from "@/lib/census-api"
 import type { LocationData } from "@/types/census"
+import { ApiKeyConfig } from "@/components/api-key-config"
 
 export function MexicanPopulationDashboard() {
   const [searchTerm, setSearchTerm] = useState("")
@@ -30,6 +31,8 @@ export function MexicanPopulationDashboard() {
   })
   const [selectedLocation, setSelectedLocation] = useState<LocationData | null>(null)
   const [showSpecificSearch, setShowSpecificSearch] = useState(false)
+  const [showApiConfig, setShowApiConfig] = useState(false)
+  const [apiKey, setApiKey] = useState<string | null>(null)
 
   useEffect(() => {
     const loadInitialData = async () => {
@@ -86,6 +89,10 @@ export function MexicanPopulationDashboard() {
     setSelectedLocation(location)
   }
 
+  const handleApiKeyChange = (newApiKey: string) => {
+    setApiKey(newApiKey)
+  }
+
   return (
     <div className="container mx-auto py-8 px-4">
       <header className="mb-8">
@@ -95,15 +102,24 @@ export function MexicanPopulationDashboard() {
         </p>
       </header>
 
-      <div className="flex justify-end mb-4">
+      <div className="flex justify-end mb-4 gap-2">
         <Button variant="outline" onClick={() => setShowSpecificSearch(!showSpecificSearch)}>
           {showSpecificSearch ? "Ocultar búsqueda específica" : "Mostrar búsqueda específica"}
+        </Button>
+        <Button variant="outline" onClick={() => setShowApiConfig(!showApiConfig)}>
+          {showApiConfig ? "Ocultar configuración API" : "Configurar API Key"}
         </Button>
       </div>
 
       {showSpecificSearch && (
         <div className="mb-8">
           <SpecificSearch />
+        </div>
+      )}
+
+      {showApiConfig && (
+        <div className="mb-8">
+          <ApiKeyConfig onApiKeyChange={handleApiKeyChange} />
         </div>
       )}
 

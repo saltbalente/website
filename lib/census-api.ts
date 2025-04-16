@@ -1,5 +1,20 @@
 import type { LocationData, AgeDistribution, IncomeDistribution, EducationDistribution } from "@/types/census"
 
+// Función para obtener la API key
+function getApiKey(): string | null {
+  // Primero intentar obtener la API key de las variables de entorno
+  const envApiKey = process.env.CENSUS_API_KEY
+
+  // Si no está disponible en las variables de entorno, intentar obtenerla de localStorage
+  // Nota: localStorage solo está disponible en el cliente
+  let localStorageApiKey = null
+  if (typeof window !== "undefined") {
+    localStorageApiKey = localStorage.getItem("census_api_key")
+  }
+
+  return envApiKey || localStorageApiKey
+}
+
 // Función principal para obtener datos de población mexicana
 export async function fetchPopulationData(): Promise<LocationData[]> {
   try {
@@ -59,7 +74,7 @@ export async function fetchPopulationData(): Promise<LocationData[]> {
 // Función para obtener datos básicos de población mexicana
 async function fetchMexicanPopulationBasic(): Promise<LocationData[]> {
   // La clave API está disponible como variable de entorno en el servidor
-  const API_KEY = process.env.CENSUS_API_KEY
+  const API_KEY = getApiKey()
 
   // Verificar que la clave API esté disponible
   if (!API_KEY) {
@@ -137,7 +152,7 @@ async function fetchMexicanPopulationBasic(): Promise<LocationData[]> {
 
 // Función para obtener distribución de edad para una ubicación específica
 async function fetchAgeDistribution(stateCode: string, placeId: string): Promise<AgeDistribution> {
-  const API_KEY = process.env.CENSUS_API_KEY
+  const API_KEY = getApiKey()
 
   if (!API_KEY) {
     throw new Error("Census API key is not available")
@@ -176,7 +191,7 @@ async function fetchAgeDistribution(stateCode: string, placeId: string): Promise
 
 // Función para obtener distribución de ingresos para una ubicación específica
 async function fetchIncomeDistribution(stateCode: string, placeId: string): Promise<IncomeDistribution> {
-  const API_KEY = process.env.CENSUS_API_KEY
+  const API_KEY = getApiKey()
 
   if (!API_KEY) {
     throw new Error("Census API key is not available")
@@ -210,7 +225,7 @@ async function fetchIncomeDistribution(stateCode: string, placeId: string): Prom
 
 // Función para obtener distribución de nivel educativo para una ubicación específica
 async function fetchEducationDistribution(stateCode: string, placeId: string): Promise<EducationDistribution> {
-  const API_KEY = process.env.CENSUS_API_KEY
+  const API_KEY = getApiKey()
 
   if (!API_KEY) {
     throw new Error("Census API key is not available")
@@ -651,7 +666,7 @@ export function applyDemographicFilters(
 
 // Función para buscar datos específicos por ubicación
 export async function fetchLocationSpecificData(stateCode: string, placeId: string): Promise<any> {
-  const API_KEY = process.env.CENSUS_API_KEY
+  const API_KEY = getApiKey()
 
   if (!API_KEY) {
     throw new Error("Census API key is not available")
@@ -753,7 +768,7 @@ export async function fetchLocationSpecificData(stateCode: string, placeId: stri
 
 // Función para obtener datos específicos por código postal
 export async function fetchDataByZipCode(zipCode: string): Promise<any> {
-  const API_KEY = process.env.CENSUS_API_KEY
+  const API_KEY = getApiKey()
 
   if (!API_KEY) {
     throw new Error("Census API key is not available")

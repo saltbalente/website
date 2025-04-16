@@ -92,3 +92,15 @@ body {
     @apply bg-background text-foreground;
   }
 }
+
+/* Estilos personalizados para el Badge de tipo success */
+.badge-success {
+  background-color: hsl(var(--success));
+  color: hsl(var(--success-foreground));
+}
+
+@layer components {
+  .badge-variant-success {
+    @apply bg-green-100 text-green-800 hover:bg-green-200;
+  }
+}
