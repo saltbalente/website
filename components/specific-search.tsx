@@ -10,10 +10,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { fetchDataByZipCode, fetchLocationSpecificData } from "@/lib/census-api"
 
 export function SpecificSearch() {
-  const [searchType, setSearchType] = useState<"zipcode" | "location">("zipcode")
+  const [searchType, setSearchType] = useState<"zipcode" | "location" | "city">("zipcode")
   const [zipCode, setZipCode] = useState("")
   const [stateCode, setStateCode] = useState("")
   const [placeId, setPlaceId] = useState("")
+  const [cityName, setCityName] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [searchResults, setSearchResults] = useState<any>(null)
   const [error, setError] = useState<string | null>(null)
@@ -34,6 +35,132 @@ export function SpecificSearch() {
     return /^\d+$/.test(place)
   }
 
+  const searchByCity = async (city: string): Promise<any> => {
+    if (!city.trim()) {
+      throw new Error("Por favor, ingresa un nombre de ciudad")
+    }
+
+    const API_KEY = localStorage.getItem("census_api_key") || process.env.CENSUS_API_KEY
+
+    if (!API_KEY) {
+      throw new Error("Census API key is not available")
+    }
+
+    // Vamos a usar un enfoque diferente: buscar primero en una lista de ciudades conocidas
+    // con sus códigos de estado y place IDs
+    const commonCities = [
+      { name: "miami", state: "12", place: "45000" }, // Miami, FL
+      { name: "los angeles", state: "06", place: "44000" }, // Los Angeles, CA
+      { name: "new york", state: "36", place: "51000" }, // New York, NY
+      { name: "chicago", state: "17", place: "14000" }, // Chicago, IL
+      { name: "houston", state: "48", place: "35000" }, // Houston, TX
+      { name: "phoenix", state: "04", place: "55000" }, // Phoenix, AZ
+      { name: "philadelphia", state: "42", place: "60000" }, // Philadelphia, PA
+      { name: "san antonio", state: "48", place: "65000" }, // San Antonio, TX
+      { name: "dallas", state: "48", place: "19000" }, // Dallas, TX
+      { name: "san jose", state: "06", place: "68000" }, // San Jose, CA
+      { name: "austin", state: "48", place: "05000" }, // Austin, TX
+      { name: "jacksonville", state: "12", place: "35000" }, // Jacksonville, FL
+      { name: "san francisco", state: "06", place: "67000" }, // San Francisco, CA
+      { name: "columbus", state: "39", place: "18000" }, // Columbus, OH
+      { name: "indianapolis", state: "18", place: "36000" }, // Indianapolis, IN
+      { name: "seattle", state: "53", place: "63000" }, // Seattle, WA
+      { name: "denver", state: "08", place: "20000" }, // Denver, CO
+      { name: "washington", state: "11", place: "50000" }, // Washington, DC
+      { name: "boston", state: "25", place: "07000" }, // Boston, MA
+      { name: "el paso", state: "48", place: "24000" }, // El Paso, TX
+      { name: "nashville", state: "47", place: "52006" }, // Nashville, TN
+      { name: "detroit", state: "26", place: "22000" }, // Detroit, MI
+      { name: "oklahoma city", state: "40", place: "55000" }, // Oklahoma City, OK
+      { name: "portland", state: "41", place: "59000" }, // Portland, OR
+      { name: "las vegas", state: "32", place: "40000" }, // Las Vegas, NV
+      { name: "memphis", state: "47", place: "48000" }, // Memphis, TN
+      { name: "louisville", state: "21", place: "48000" }, // Louisville, KY
+      { name: "baltimore", state: "24", place: "04000" }, // Baltimore, MD
+      { name: "milwaukee", state: "55", place: "53000" }, // Milwaukee, WI
+      { name: "albuquerque", state: "35", place: "02000" }, // Albuquerque, NM
+      { name: "tucson", state: "04", place: "77000" }, // Tucson, AZ
+      { name: "fresno", state: "06", place: "27000" }, // Fresno, CA
+      { name: "sacramento", state: "06", place: "64000" }, // Sacramento, CA
+      { name: "mesa", state: "04", place: "46000" }, // Mesa, AZ
+      { name: "atlanta", state: "13", place: "04000" }, // Atlanta, GA
+    ]
+
+    // Buscar en la lista de ciudades conocidas
+    const normalizedCityName = city.toLowerCase().trim()
+    const cityMatch = commonCities.find(
+      (c) =>
+        c.name === normalizedCityName || c.name.includes(normalizedCityName) || normalizedCityName.includes(c.name),
+    )
+
+    if (cityMatch) {
+      console.log(
+        `Ciudad encontrada en la lista predefinida: ${cityMatch.name}, state: ${cityMatch.state}, place: ${cityMatch.place}`,
+      )
+      return fetchLocationSpecificData(cityMatch.state, cityMatch.place)
+    }
+
+    // Si no se encuentra en la lista predefinida, intentar una búsqueda más específica
+    try {
+      // Intentar buscar la ciudad directamente por su nombre
+      const baseUrl = "https://api.census.gov/data/2021/acs/acs5"
+
+      // Construir la URL para buscar datos específicos
+      // Usamos variables básicas para minimizar errores
+      const variables = [
+        "B03001_001E", // Total population
+        "B03001_004E", // Mexican population
+        "B19013_001E", // Median household income
+      ].join(",")
+
+      // Buscar en todos los estados para encontrar la ciudad
+      // Nota: Esto es menos eficiente pero más probable que encuentre la ciudad
+      const searchUrl = `${baseUrl}?get=${variables},NAME&for=place:*&in=state:*&key=${API_KEY}`
+
+      const response = await fetch(searchUrl)
+
+      if (!response.ok) {
+        throw new Error(`Error en la API del Census: ${response.status} ${response.statusText}`)
+      }
+
+      const data = await response.json()
+
+      // Filtrar los resultados para encontrar lugares que coincidan con el nombre de la ciudad
+      const headers = data[0]
+      const nameIndex = headers.indexOf("NAME")
+      const stateIndex = headers.indexOf("state")
+      const placeIndex = headers.indexOf("place")
+
+      const matches = data.slice(1).filter((row: any) => {
+        const placeName = row[nameIndex].split(",")[0].toLowerCase()
+        return placeName.includes(normalizedCityName) || normalizedCityName.includes(placeName)
+      })
+
+      if (matches.length === 0) {
+        throw new Error(
+          `No se encontraron resultados para "${city}". Intenta con otro nombre de ciudad o verifica la ortografía.`,
+        )
+      }
+
+      // Usar el primer resultado que coincida
+      const match = matches[0]
+      const stateCode = match[stateIndex]
+      const placeId = match[placeIndex]
+
+      console.log(`Ciudad encontrada en la API: ${match[nameIndex]}, state: ${stateCode}, place: ${placeId}`)
+
+      // Ahora que tenemos el código de estado y el ID de lugar, obtener los datos demográficos
+      return fetchLocationSpecificData(stateCode, placeId)
+    } catch (error) {
+      console.error("Error en la búsqueda por ciudad:", error)
+
+      // Proporcionar un mensaje de error más descriptivo
+      throw new Error(
+        `No se pudo encontrar datos para "${city}". Por favor, intenta con una ciudad más grande o usa otra opción de búsqueda. Error: ${error instanceof Error ? error.message : "Error desconocido"}`,
+      )
+    }
+  }
+
   const handleSearch = async () => {
     setIsLoading(true)
     setError(null)
@@ -52,6 +179,12 @@ export function SpecificSearch() {
         }
 
         results = await fetchDataByZipCode(zipCode)
+      } else if (searchType === "city") {
+        if (!cityName) {
+          throw new Error("Por favor, ingresa un nombre de ciudad")
+        }
+
+        results = await searchByCity(cityName)
       } else {
         if (!stateCode) {
           throw new Error("Por favor, ingresa un código de estado")
@@ -209,12 +342,34 @@ export function SpecificSearch() {
           <Button variant={searchType === "zipcode" ? "default" : "outline"} onClick={() => setSearchType("zipcode")}>
             Código Postal
           </Button>
+          <Button variant={searchType === "city" ? "default" : "outline"} onClick={() => setSearchType("city")}>
+            Ciudad
+          </Button>
           <Button variant={searchType === "location" ? "default" : "outline"} onClick={() => setSearchType("location")}>
             Ubicación Específica
           </Button>
         </div>
 
-        {searchType === "zipcode" ? (
+        {searchType === "city" ? (
+          <div className="space-y-2">
+            <label htmlFor="cityname" className="text-sm font-medium">
+              Nombre de Ciudad
+            </label>
+            <div className="flex gap-2">
+              <Input
+                id="cityname"
+                placeholder="Ej: Miami"
+                value={cityName}
+                onChange={(e) => setCityName(e.target.value)}
+              />
+              <Button onClick={handleSearch} disabled={isLoading}>
+                {isLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Search className="h-4 w-4 mr-2" />}
+                Buscar
+              </Button>
+            </div>
+            <p className="text-xs text-gray-500 mt-1">Ingresa el nombre de una ciudad en Estados Unidos</p>
+          </div>
+        ) : searchType === "zipcode" ? (
           <div className="space-y-2">
             <label htmlFor="zipcode" className="text-sm font-medium">
               Código Postal
@@ -284,6 +439,9 @@ export function SpecificSearch() {
         {searchResults && renderResults()}
       </CardContent>
       <CardFooter className="flex flex-col items-start text-xs text-gray-500">
+        <p className="mb-1">
+          <strong>Ejemplos de ciudades:</strong> Miami (FL), Los Angeles (CA), Chicago (IL), Houston (TX)
+        </p>
         <p className="mb-1">
           <strong>Ejemplos de códigos postales válidos:</strong> 90022 (East Los Angeles, CA), 78501 (McAllen, TX),
           10001 (New York, NY)
