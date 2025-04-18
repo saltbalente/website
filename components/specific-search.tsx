@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Search, Loader2, AlertCircle, Info } from "lucide-react"
+import { Search, Loader2, AlertCircle, Download } from "lucide-react"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -306,205 +306,29 @@ export function SpecificSearch() {
     }
   }
 
-  const handleSearch = async () => {
-    setIsLoading(true)
-    setError(null)
-    setSearchResults(null)
-    setStateCitiesResults([])
-    setSelectedCityData(null)
+  // Función para exportar los nombres de las ciudades a un archivo CSV
+  const exportCityNames = () => {
+    if (stateCitiesResults.length === 0) return
 
-    try {
-      if (searchType === "zipcode") {
-        if (!zipCode) {
-          throw new Error("Por favor, ingresa un código postal")
-        }
+    // Crear contenido CSV con solo los nombres de las ciudades
+    const csvContent = "Ciudad\n" + stateCitiesResults.map((city) => city.name).join("\n")
 
-        if (!validateZipCode(zipCode)) {
-          throw new Error("El código postal debe tener 5 dígitos numéricos (formato XXXXX)")
-        }
+    // Crear un blob con el contenido CSV
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
 
-        const results = await fetchDataByZipCode(zipCode)
-        setSearchResults(results)
-      } else if (searchType === "city") {
-        if (!cityName) {
-          throw new Error("Por favor, ingresa un nombre de ciudad")
-        }
+    // Crear un enlace para descargar el archivo
+    const link = document.createElement("a")
+    const url = URL.createObjectURL(blob)
 
-        const results = await searchByCity(cityName)
-        setSearchResults(results)
-      } else if (searchType === "state") {
-        if (!selectedState) {
-          throw new Error("Por favor, selecciona un estado")
-        }
+    // Configurar el enlace
+    const stateName = US_STATES.find((state) => state.code === selectedState)?.name || "Estado"
+    link.setAttribute("href", url)
+    link.setAttribute("download", `ciudades_mexicanas_${stateName.toLowerCase().replace(/\s+/g, "_")}.csv`)
 
-        const cities = await searchCitiesByState(selectedState)
-        setStateCitiesResults(cities)
-      } else if (searchType === "neighborhood") {
-        // La búsqueda de barrios se maneja en el componente NeighborhoodExplorer
-        return
-      } else {
-        if (!stateCode) {
-          throw new Error("Por favor, ingresa un código de estado")
-        }
-
-        if (!validateStateCode(stateCode)) {
-          throw new Error("El código de estado debe tener 2 dígitos numéricos (formato XX)")
-        }
-
-        if (!placeId) {
-          throw new Error("Por favor, ingresa un ID de lugar")
-        }
-
-        if (!validatePlaceId(placeId)) {
-          throw new Error("El ID de lugar debe contener solo dígitos numéricos")
-        }
-
-        const results = await fetchLocationSpecificData(stateCode, placeId)
-        setSearchResults(results)
-      }
-    } catch (error) {
-      console.error("Error en la búsqueda:", error)
-      setError(error instanceof Error ? error.message : "Error desconocido en la búsqueda")
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const handleCitySelect = async (city: any) => {
-    setIsLoading(true)
-    setError(null)
-    setSelectedCityData(null)
-
-    try {
-      const cityData = await fetchLocationSpecificData(city.stateCode, city.placeId)
-      setSelectedCityData(cityData)
-    } catch (error) {
-      console.error("Error al obtener datos detallados de la ciudad:", error)
-      setError(
-        `No se pudieron obtener datos detallados para ${city.name}. Error: ${
-          error instanceof Error ? error.message : "Error desconocido"
-        }`,
-      )
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  // Función para renderizar los resultados de manera organizada
-  const renderResults = () => {
-    if (!searchResults) return null
-
-    // Filtrar los datos originales si están presentes
-    const displayData = { ...searchResults }
-    const rawData = displayData._datosOriginales
-    delete displayData._datosOriginales
-
-    // Agrupar los datos en categorías
-    const generalInfo = {}
-    const demographicInfo = {}
-    const economicInfo = {}
-    const educationInfo = {}
-
-    Object.entries(displayData).forEach(([key, value]) => {
-      if (
-        key.includes("Código") ||
-        key.includes("Año") ||
-        key.includes("Nombre") ||
-        key.includes("Estado") ||
-        key.includes("ID")
-      ) {
-        generalInfo[key] = value
-      } else if (key.includes("Población") || key.includes("Porcentaje Mexicano")) {
-        demographicInfo[key] = value
-      } else if (key.includes("Ingreso")) {
-        economicInfo[key] = value
-      } else if (key.includes("Educación") || key.includes("Licenciatura") || key.includes("Posgrado")) {
-        educationInfo[key] = value
-      }
-    })
-
-    return (
-      <div className="mt-4">
-        <h3 className="font-medium text-lg mb-2">Resultados de la búsqueda</h3>
-
-        <Tabs defaultValue="general" className="w-full">
-          <TabsList className="grid grid-cols-4 mb-4">
-            <TabsTrigger value="general">General</TabsTrigger>
-            <TabsTrigger value="demographic">Demografía</TabsTrigger>
-            <TabsTrigger value="economic">Económico</TabsTrigger>
-            <TabsTrigger value="education">Educación</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="general" className="bg-gray-50 rounded-md p-4">
-            <h4 className="font-medium mb-2">Información General</h4>
-            <div className="space-y-2">
-              {Object.entries(generalInfo).map(([key, value]) => (
-                <div key={key} className="grid grid-cols-2 gap-2 text-sm">
-                  <div className="font-medium">{key}:</div>
-                  <div>{String(value)}</div>
-                </div>
-              ))}
-            </div>
-          </TabsContent>
-
-          <TabsContent value="demographic" className="bg-gray-50 rounded-md p-4">
-            <h4 className="font-medium mb-2">Información Demográfica</h4>
-            <div className="space-y-2">
-              {Object.entries(demographicInfo).map(([key, value]) => (
-                <div key={key} className="grid grid-cols-2 gap-2 text-sm">
-                  <div className="font-medium">{key}:</div>
-                  <div>{String(value)}</div>
-                </div>
-              ))}
-            </div>
-          </TabsContent>
-
-          <TabsContent value="economic" className="bg-gray-50 rounded-md p-4">
-            <h4 className="font-medium mb-2">Información Económica</h4>
-            <div className="space-y-2">
-              {Object.entries(economicInfo).map(([key, value]) => (
-                <div key={key} className="grid grid-cols-2 gap-2 text-sm">
-                  <div className="font-medium">{key}:</div>
-                  <div>{String(value)}</div>
-                </div>
-              ))}
-            </div>
-          </TabsContent>
-
-          <TabsContent value="education" className="bg-gray-50 rounded-md p-4">
-            <h4 className="font-medium mb-2">Información Educativa</h4>
-            <div className="space-y-2">
-              {Object.entries(educationInfo).map(([key, value]) => (
-                <div key={key} className="grid grid-cols-2 gap-2 text-sm">
-                  <div className="font-medium">{key}:</div>
-                  <div>{String(value)}</div>
-                </div>
-              ))}
-            </div>
-          </TabsContent>
-        </Tabs>
-
-        {rawData && (
-          <div className="mt-4">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowRawData(!showRawData)}
-              className="text-xs flex items-center gap-1"
-            >
-              <Info className="h-3 w-3" />
-              {showRawData ? "Ocultar datos originales" : "Mostrar datos originales"}
-            </Button>
-
-            {showRawData && (
-              <div className="mt-2 p-3 bg-gray-100 rounded-md text-xs font-mono overflow-x-auto">
-                <pre>{JSON.stringify(rawData, null, 2)}</pre>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    )
+    // Añadir el enlace al documento, hacer clic y luego eliminarlo
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
   }
 
   // Función para renderizar la tabla de ciudades por estado
@@ -515,9 +339,15 @@ export function SpecificSearch() {
 
     return (
       <div className="mt-4">
-        <h3 className="font-medium text-lg mb-2">
-          Ciudades con población mexicana en {stateName} ({stateCitiesResults.length})
-        </h3>
+        <div className="flex justify-between items-center mb-2">
+          <h3 className="font-medium text-lg">
+            Ciudades con población mexicana en {stateName} ({stateCitiesResults.length})
+          </h3>
+          <Button variant="outline" size="sm" onClick={exportCityNames} className="flex items-center gap-1">
+            <Download className="h-4 w-4" />
+            Exportar ciudades
+          </Button>
+        </div>
 
         <div className="rounded-md border overflow-hidden">
           <Table>
@@ -647,6 +477,98 @@ export function SpecificSearch() {
         </TabsContent>
       </Tabs>
     )
+  }
+
+  const handleSearch = async () => {
+    setIsLoading(true)
+    setError(null)
+    setSearchResults(null)
+    setStateCitiesResults([])
+    setSelectedCityData(null)
+
+    try {
+      switch (searchType) {
+        case "zipcode":
+          if (!validateZipCode(zipCode)) {
+            throw new Error("Código postal inválido. Debe tener 5 dígitos.")
+          }
+          const zipCodeResults = await fetchDataByZipCode(zipCode)
+          setSearchResults(zipCodeResults)
+          break
+        case "location":
+          if (!validateStateCode(stateCode) || !validatePlaceId(placeId)) {
+            throw new Error("Código de estado o ID de lugar inválido.")
+          }
+          const locationResults = await fetchLocationSpecificData(stateCode, placeId)
+          setSearchResults(locationResults)
+          break
+        case "city":
+          const cityResults = await searchByCity(cityName)
+          setSearchResults(cityResults)
+          break
+        case "state":
+          if (!selectedState) {
+            throw new Error("Por favor, selecciona un estado.")
+          }
+          const cities = await searchCitiesByState(selectedState)
+          setStateCitiesResults(cities)
+          break
+        default:
+          throw new Error("Tipo de búsqueda no válido")
+      }
+    } catch (err: any) {
+      setError(err.message || "Error al realizar la búsqueda")
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const renderResults = () => {
+    if (!searchResults) return null
+
+    const displayData = { ...searchResults }
+    const rawData = displayData._datosOriginales
+    delete displayData._datosOriginales
+
+    return (
+      <div className="mt-4">
+        <h3 className="font-medium text-lg">Resultados de la Búsqueda</h3>
+        <Tabs defaultValue="data" className="w-full mt-2">
+          <TabsList className="grid grid-cols-2">
+            <TabsTrigger value="data">Datos Demográficos</TabsTrigger>
+            <TabsTrigger value="raw">Datos Originales</TabsTrigger>
+          </TabsList>
+          <TabsContent value="data">
+            <div className="space-y-2">
+              {Object.entries(displayData).map(([key, value]) => (
+                <div key={key} className="grid grid-cols-2 gap-2 text-sm">
+                  <div className="font-medium">{key}:</div>
+                  <div>{String(value)}</div>
+                </div>
+              ))}
+            </div>
+          </TabsContent>
+          <TabsContent value="raw">
+            <pre className="text-xs whitespace-pre-wrap break-words">{JSON.stringify(rawData, null, 2)}</pre>
+          </TabsContent>
+        </Tabs>
+      </div>
+    )
+  }
+
+  const handleCitySelect = async (city: any) => {
+    setIsLoading(true)
+    setError(null)
+    setSelectedCityData(null)
+
+    try {
+      const cityData = await fetchLocationSpecificData(city.stateCode, city.placeId)
+      setSelectedCityData(cityData)
+    } catch (err: any) {
+      setError(err.message || "Error al obtener detalles de la ciudad")
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   return (
