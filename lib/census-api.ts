@@ -91,76 +91,146 @@ async function fetchMexicanPopulationBasic(): Promise<LocationData[]> {
 
   // Verificar que la clave API esté disponible
   if (!API_KEY) {
-    throw new Error("Census API key is not available")
+    console.warn("Census API key is not available, using backup data")
+    return getBackupData()
   }
 
-  // Construir URL para la API del Census Bureau
-  // Utilizamos la American Community Survey (ACS) 5-year data
-  // B03001_001E: Total population
-  // B03001_004E: Mexican population (Hispanic or Latino origin by specific origin)
-  // NAME: Geographic area name
-  const baseUrl = "https://api.census.gov/data/2021/acs/acs5"
-  const url = `${baseUrl}?get=NAME,B03001_001E,B03001_004E&for=place:*&in=state:*&key=${API_KEY}`
+  try {
+    // Construir URL para la API del Census Bureau
+    // Utilizamos la American Community Survey (ACS) 5-year data
+    // B03001_001E: Total population
+    // B03001_004E: Mexican population (Hispanic or Latino origin by specific origin)
+    // NAME: Geographic area name
+    const baseUrl = "https://api.census.gov/data/2021/acs/acs5"
+    const url = `${baseUrl}?get=NAME,B03001_001E,B03001_004E&for=place:*&in=state:*&key=${API_KEY}`
 
-  // Realizar la solicitud a la API
-  const response = await fetch(url)
+    // Implementar un timeout para la solicitud fetch
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => {
+      controller.abort()
+      console.warn("Timeout fetching Mexican population basic data")
+    }, 15000) // 15 segundos de timeout para esta solicitud más grande
 
-  if (!response.ok) {
-    throw new Error(`Census API error: ${response.status} ${response.statusText}`)
-  }
+    try {
+      // Realizar la solicitud a la API
+      const response = await fetch(url, {
+        signal: controller.signal,
+        // Añadir headers para evitar problemas de caché
+        headers: {
+          "Cache-Control": "no-cache",
+          Pragma: "no-cache",
+        },
+      })
 
-  const rawData = await response.json()
+      // Limpiar el timeout independientemente del resultado
+      clearTimeout(timeoutId)
 
-  // El primer elemento contiene los encabezados
-  const headers = rawData[0]
-  const nameIndex = headers.indexOf("NAME")
-  const totalPopIndex = headers.indexOf("B03001_001E")
-  const mexicanPopIndex = headers.indexOf("B03001_004E")
-  const stateIndex = headers.indexOf("state")
-  const placeIndex = headers.indexOf("place")
-
-  // Procesar los datos
-  const processedData: LocationData[] = rawData
-    .slice(1) // Omitir encabezados
-    .map((row: any) => {
-      // Extraer nombre y estado
-      const fullName = row[nameIndex]
-      const nameParts = fullName.split(", ")
-      const name = nameParts[0]
-      const stateAbbr = nameParts[1]
-      const state = getStateFullName(stateAbbr)
-      const stateCode = row[stateIndex] // Código de estado para usar en futuras consultas
-
-      // Extraer y convertir datos de población
-      const totalPopulation = Number.parseInt(row[totalPopIndex]) || 0
-      const mexicanPopulation = Number.parseInt(row[mexicanPopIndex]) || 0
-
-      // Calcular porcentaje
-      const percentage =
-        totalPopulation > 0 ? Number.parseFloat(((mexicanPopulation / totalPopulation) * 100).toFixed(1)) : 0
-
-      // Generar un código postal ficticio basado en el código de lugar
-      const placeCode = row[placeIndex]
-      const zipCode = `${stateCode}${placeCode.substring(0, 3)}`.padEnd(5, "0")
-
-      return {
-        name,
-        state,
-        stateCode, // Guardar el código de estado para futuras consultas
-        placeId: placeCode, // Guardar el ID del lugar para futuras consultas
-        population: mexicanPopulation,
-        percentage,
-        zipCode,
+      if (!response.ok) {
+        console.warn(`Census API error: ${response.status} ${response.statusText}. Using backup data.`)
+        return getBackupData()
       }
-    })
-    // Filtrar lugares con población mexicana significativa (más de 1000)
-    .filter((location) => location.population > 1000)
-    // Ordenar por población mexicana (de mayor a menor)
-    .sort((a, b) => b.population - a.population)
-    // Limitar a los 50 principales lugares para rendimiento y límites de API
-    .slice(0, 50)
 
-  return processedData
+      const rawData = await response.json()
+
+      // Verificar que los datos tengan el formato esperado
+      if (!Array.isArray(rawData) || rawData.length < 2) {
+        console.warn("Census API returned unexpected data format. Using backup data.")
+        return getBackupData()
+      }
+
+      // El primer elemento contiene los encabezados
+      const headers = rawData[0]
+      const nameIndex = headers.indexOf("NAME")
+      const totalPopIndex = headers.indexOf("B03001_001E")
+      const mexicanPopIndex = headers.indexOf("B03001_004E")
+      const stateIndex = headers.indexOf("state")
+      const placeIndex = headers.indexOf("place")
+
+      // Verificar que todos los índices sean válidos
+      if (
+        nameIndex === -1 ||
+        totalPopIndex === -1 ||
+        mexicanPopIndex === -1 ||
+        stateIndex === -1 ||
+        placeIndex === -1
+      ) {
+        console.warn("Census API returned unexpected headers. Using backup data.")
+        return getBackupData()
+      }
+
+      // Procesar los datos
+      const processedData: LocationData[] = rawData
+        .slice(1) // Omitir encabezados
+        .map((row: any) => {
+          try {
+            // Extraer nombre y estado
+            const fullName = row[nameIndex]
+            const nameParts = fullName.split(", ")
+            const name = nameParts[0]
+            const stateAbbr = nameParts[1]
+            const state = getStateFullName(stateAbbr)
+            const stateCode = row[stateIndex] // Código de estado para usar en futuras consultas
+
+            // Extraer y convertir datos de población
+            const totalPopulation = Number.parseInt(row[totalPopIndex]) || 0
+            const mexicanPopulation = Number.parseInt(row[mexicanPopIndex]) || 0
+
+            // Calcular porcentaje
+            const percentage =
+              totalPopulation > 0 ? Number.parseFloat(((mexicanPopulation / totalPopulation) * 100).toFixed(1)) : 0
+
+            // Generar un código postal ficticio basado en el código de lugar
+            const placeCode = row[placeIndex]
+            const zipCode = `${stateCode}${placeCode.substring(0, 3)}`.padEnd(5, "0")
+
+            return {
+              name,
+              state,
+              stateCode, // Guardar el código de estado para futuras consultas
+              placeId: placeCode, // Guardar el ID del lugar para futuras consultas
+              population: mexicanPopulation,
+              percentage,
+              zipCode,
+            }
+          } catch (rowError) {
+            console.warn("Error processing row:", rowError)
+            return null
+          }
+        })
+        .filter(Boolean) // Eliminar elementos nulos
+        // Filtrar lugares con población mexicana significativa (más de 1000)
+        .filter((location) => location.population > 1000)
+        // Ordenar por población mexicana (de mayor a menor)
+        .sort((a, b) => b.population - a.population)
+        // Limitar a los 50 principales lugares para rendimiento y límites de API
+        .slice(0, 50)
+
+      // Verificar que haya datos procesados
+      if (processedData.length === 0) {
+        console.warn("No processed data available. Using backup data.")
+        return getBackupData()
+      }
+
+      return processedData
+    } catch (fetchError) {
+      // Limpiar el timeout en caso de error
+      clearTimeout(timeoutId)
+
+      // Verificar si el error es por timeout o por otra razón
+      if (fetchError.name === "AbortError") {
+        console.warn("Timeout fetching Mexican population basic data")
+      } else {
+        console.error("Error fetching Mexican population basic data:", fetchError)
+      }
+
+      // Usar datos de respaldo en caso de error
+      return getBackupData()
+    }
+  } catch (error) {
+    console.error("Error in fetchMexicanPopulationBasic:", error)
+    // En caso de error, devolver datos de respaldo
+    return getBackupData()
+  }
 }
 
 // Función para obtener distribución de edad para una ubicación específica
@@ -184,36 +254,57 @@ async function fetchAgeDistribution(stateCode: string, placeId: string): Promise
   try {
     // Implementar un timeout para la solicitud fetch
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 10000) // 10 segundos de timeout
+    const timeoutId = setTimeout(() => {
+      controller.abort()
+      console.warn(`Timeout fetching age data for place ${placeId} in state ${stateCode}`)
+    }, 8000) // 8 segundos de timeout (reducido de 10)
 
-    const response = await fetch(url, {
-      signal: controller.signal,
-      // Añadir headers para evitar problemas de caché
-      headers: {
-        "Cache-Control": "no-cache",
-        Pragma: "no-cache",
-      },
-    }).finally(() => clearTimeout(timeoutId))
+    try {
+      const response = await fetch(url, {
+        signal: controller.signal,
+        // Añadir headers para evitar problemas de caché
+        headers: {
+          "Cache-Control": "no-cache",
+          Pragma: "no-cache",
+        },
+      })
 
-    if (!response.ok) {
-      console.warn(`Census API error for age data: ${response.status}. Using simulated data.`)
+      // Limpiar el timeout independientemente del resultado
+      clearTimeout(timeoutId)
+
+      if (!response.ok) {
+        console.warn(`Census API error for age data: ${response.status}. Using simulated data.`)
+        return generateSimulatedAgeData(10000)
+      }
+
+      const data = await response.json()
+
+      // Verificar que los datos tengan el formato esperado
+      if (!Array.isArray(data) || data.length < 2 || !data[1][0]) {
+        console.warn("Census API returned unexpected data format. Using simulated data.")
+        return generateSimulatedAgeData(10000)
+      }
+
+      // Como estamos usando variables simplificadas, generaremos datos simulados
+      // basados en la población total pero con una distribución realista
+      const totalPopulation = Number.parseInt(data[1][0]) || 10000
+
+      // Generar datos simulados basados en la población total
+      return generateSimulatedAgeData(totalPopulation)
+    } catch (fetchError) {
+      // Limpiar el timeout en caso de error
+      clearTimeout(timeoutId)
+
+      // Verificar si el error es por timeout o por otra razón
+      if (fetchError.name === "AbortError") {
+        console.warn(`Timeout fetching age data for place ${placeId} in state ${stateCode}`)
+      } else {
+        console.error(`Error fetching age data for place ${placeId} in state ${stateCode}:`, fetchError)
+      }
+
+      // Generar datos simulados en caso de error
       return generateSimulatedAgeData(10000)
     }
-
-    const data = await response.json()
-
-    // Verificar que los datos tengan el formato esperado
-    if (!Array.isArray(data) || data.length < 2 || !data[1][0]) {
-      console.warn("Census API returned unexpected data format. Using simulated data.")
-      return generateSimulatedAgeData(10000)
-    }
-
-    // Como estamos usando variables simplificadas, generaremos datos simulados
-    // basados en la población total pero con una distribución realista
-    const totalPopulation = Number.parseInt(data[1][0]) || 10000
-
-    // Generar datos simulados basados en la población total
-    return generateSimulatedAgeData(totalPopulation)
   } catch (error) {
     console.error(`Error fetching age data for place ${placeId} in state ${stateCode}:`, error)
     // Generar datos simulados
@@ -240,33 +331,54 @@ async function fetchIncomeDistribution(stateCode: string, placeId: string): Prom
   try {
     // Implementar un timeout para la solicitud fetch
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 10000) // 10 segundos de timeout
+    const timeoutId = setTimeout(() => {
+      controller.abort()
+      console.warn(`Timeout fetching income data for place ${placeId} in state ${stateCode}`)
+    }, 8000) // 8 segundos de timeout (reducido de 10)
 
-    const response = await fetch(url, {
-      signal: controller.signal,
-      // Añadir headers para evitar problemas de caché
-      headers: {
-        "Cache-Control": "no-cache",
-        Pragma: "no-cache",
-      },
-    }).finally(() => clearTimeout(timeoutId))
+    try {
+      const response = await fetch(url, {
+        signal: controller.signal,
+        // Añadir headers para evitar problemas de caché
+        headers: {
+          "Cache-Control": "no-cache",
+          Pragma: "no-cache",
+        },
+      })
 
-    if (!response.ok) {
-      console.warn(`Census API error for income data: ${response.status}. Using simulated data.`)
-      return generateSimulatedIncomeDataFromMedian(50000) // Valor predeterminado razonable
-    }
+      // Limpiar el timeout independientemente del resultado
+      clearTimeout(timeoutId)
 
-    const data = await response.json()
+      if (!response.ok) {
+        console.warn(`Census API error for income data: ${response.status}. Using simulated data.`)
+        return generateSimulatedIncomeDataFromMedian(50000) // Valor predeterminado razonable
+      }
 
-    // Verificar que los datos tengan el formato esperado
-    if (!Array.isArray(data) || data.length < 2 || !data[1][0]) {
-      console.warn("Census API returned unexpected data format. Using simulated data.")
+      const data = await response.json()
+
+      // Verificar que los datos tengan el formato esperado
+      if (!Array.isArray(data) || data.length < 2 || !data[1][0]) {
+        console.warn("Census API returned unexpected data format. Using simulated data.")
+        return generateSimulatedIncomeDataFromMedian(50000)
+      }
+
+      // Generar datos simulados basados en el ingreso medio
+      const medianIncome = Number.parseInt(data[1][0]) || 50000
+      return generateSimulatedIncomeDataFromMedian(medianIncome)
+    } catch (fetchError) {
+      // Limpiar el timeout en caso de error
+      clearTimeout(timeoutId)
+
+      // Verificar si el error es por timeout o por otra razón
+      if (fetchError.name === "AbortError") {
+        console.warn(`Timeout fetching income data for place ${placeId} in state ${stateCode}`)
+      } else {
+        console.error(`Error fetching income data for place ${placeId} in state ${stateCode}:`, fetchError)
+      }
+
+      // Generar datos simulados en caso de error
       return generateSimulatedIncomeDataFromMedian(50000)
     }
-
-    // Generar datos simulados basados en el ingreso medio
-    const medianIncome = Number.parseInt(data[1][0]) || 50000
-    return generateSimulatedIncomeDataFromMedian(medianIncome)
   } catch (error) {
     console.error(`Error fetching income data for place ${placeId} in state ${stateCode}:`, error)
     // Generar datos simulados con un valor predeterminado razonable
@@ -296,49 +408,70 @@ async function fetchEducationDistribution(stateCode: string, placeId: string): P
   try {
     // Implementar un timeout para la solicitud fetch
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 10000) // 10 segundos de timeout
+    const timeoutId = setTimeout(() => {
+      controller.abort()
+      console.warn(`Timeout fetching education data for place ${placeId} in state ${stateCode}`)
+    }, 8000) // 8 segundos de timeout (reducido de 10)
 
-    const response = await fetch(url, {
-      signal: controller.signal,
-      // Añadir headers para evitar problemas de caché
-      headers: {
-        "Cache-Control": "no-cache",
-        Pragma: "no-cache",
-      },
-    }).finally(() => clearTimeout(timeoutId))
+    try {
+      const response = await fetch(url, {
+        signal: controller.signal,
+        // Añadir headers para evitar problemas de caché
+        headers: {
+          "Cache-Control": "no-cache",
+          Pragma: "no-cache",
+        },
+      })
 
-    if (!response.ok) {
-      console.warn(`Census API error for education data: ${response.status}. Using simulated data.`)
+      // Limpiar el timeout independientemente del resultado
+      clearTimeout(timeoutId)
+
+      if (!response.ok) {
+        console.warn(`Census API error for education data: ${response.status}. Using simulated data.`)
+        return generateSimulatedEducationData(10000)
+      }
+
+      const data = await response.json()
+
+      // Verificar que los datos tengan el formato esperado
+      if (!Array.isArray(data) || data.length < 2 || !data[1][0]) {
+        console.warn("Census API returned unexpected data format. Using simulated data.")
+        return generateSimulatedEducationData(10000)
+      }
+
+      // Procesar los datos de educación
+      const totalPopulation = Number.parseInt(data[1][0]) || 0
+      const highSchoolGrads = Number.parseInt(data[1][1]) || 0
+      const bachelorsGrads = Number.parseInt(data[1][2]) || 0
+      const mastersGrads = Number.parseInt(data[1][3]) || 0
+
+      // Calcular valores aproximados para las otras categorías
+      const graduate = mastersGrads
+      const bachelors = bachelorsGrads - mastersGrads
+      const someCollege = Math.round(totalPopulation * 0.2) // Aproximación
+      const highSchool = highSchoolGrads - bachelorsGrads - someCollege
+      const lessHighSchool = totalPopulation - highSchoolGrads
+
+      return {
+        lessHighSchool: Math.max(0, lessHighSchool),
+        highSchool: Math.max(0, highSchool),
+        someCollege: Math.max(0, someCollege),
+        bachelors: Math.max(0, bachelors),
+        graduate: Math.max(0, graduate),
+      }
+    } catch (fetchError) {
+      // Limpiar el timeout en caso de error
+      clearTimeout(timeoutId)
+
+      // Verificar si el error es por timeout o por otra razón
+      if (fetchError.name === "AbortError") {
+        console.warn(`Timeout fetching education data for place ${placeId} in state ${stateCode}`)
+      } else {
+        console.error(`Error fetching education data for place ${placeId} in state ${stateCode}:`, fetchError)
+      }
+
+      // Generar datos simulados en caso de error
       return generateSimulatedEducationData(10000)
-    }
-
-    const data = await response.json()
-
-    // Verificar que los datos tengan el formato esperado
-    if (!Array.isArray(data) || data.length < 2 || !data[1][0]) {
-      console.warn("Census API returned unexpected data format. Using simulated data.")
-      return generateSimulatedEducationData(10000)
-    }
-
-    // Procesar los datos de educación
-    const totalPopulation = Number.parseInt(data[1][0]) || 0
-    const highSchoolGrads = Number.parseInt(data[1][1]) || 0
-    const bachelorsGrads = Number.parseInt(data[1][2]) || 0
-    const mastersGrads = Number.parseInt(data[1][3]) || 0
-
-    // Calcular valores aproximados para las otras categorías
-    const graduate = mastersGrads
-    const bachelors = bachelorsGrads - mastersGrads
-    const someCollege = Math.round(totalPopulation * 0.2) // Aproximación
-    const highSchool = highSchoolGrads - bachelorsGrads - someCollege
-    const lessHighSchool = totalPopulation - highSchoolGrads
-
-    return {
-      lessHighSchool: Math.max(0, lessHighSchool),
-      highSchool: Math.max(0, highSchool),
-      someCollege: Math.max(0, someCollege),
-      bachelors: Math.max(0, bachelors),
-      graduate: Math.max(0, graduate),
     }
   } catch (error) {
     console.error(`Error fetching education data for place ${placeId} in state ${stateCode}:`, error)
