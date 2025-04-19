@@ -9,6 +9,17 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Label } from "@/components/ui/label"
 import { fetchDataByZipCode, fetchLocationSpecificData } from "@/lib/census-api"
 import { NeighborhoodExplorer } from "@/components/neighborhood-explorer"
 
@@ -68,7 +79,14 @@ const US_STATES = [
 ]
 
 export function SpecificSearch() {
-  const [searchType, setSearchType] = useState<"zipcode" | "location" | "city" | "state" | "neighborhood">("zipcode")
+  const [searchType, setSearchType] = useState<
+    "zipcode" | "location" | "city" | "state" | "neighborhood" | "topCities"
+  >("zipcode")
+  const [topCitiesCount, setTopCitiesCount] = useState(10)
+  const [topCitiesResults, setTopCitiesResults] = useState<any[]>([])
+  const [isLoadingStates, setIsLoadingStates] = useState(false)
+  const [loadedStatesCount, setLoadedStatesCount] = useState(0)
+  const [totalStatesCount, setTotalStatesCount] = useState(0)
   const [zipCode, setZipCode] = useState("")
   const [stateCode, setStateCode] = useState("")
   const [placeId, setPlaceId] = useState("")
@@ -80,6 +98,14 @@ export function SpecificSearch() {
   const [selectedCityData, setSelectedCityData] = useState<any>(null)
   const [error, setError] = useState<string | null>(null)
   const [showRawData, setShowRawData] = useState(false)
+  const [exportDialogOpen, setExportDialogOpen] = useState(false)
+  const [selectedColumns, setSelectedColumns] = useState({
+    name: true,
+    stateName: false,
+    mexicanPopulation: false,
+    percentage: false,
+    medianIncome: false,
+  })
 
   // Validar código postal
   const validateZipCode = (zip: string): boolean => {
@@ -306,12 +332,103 @@ export function SpecificSearch() {
     }
   }
 
-  // Función para exportar los nombres de las ciudades a un archivo CSV
-  const exportCityNames = () => {
+  // Función para obtener las principales ciudades con población mexicana de cada estado
+  const fetchTopCitiesByState = async () => {
+    setIsLoadingStates(true)
+    setError(null)
+    setTopCitiesResults([])
+
+    try {
+      // Filtrar estados con códigos válidos (excluyendo territorios o casos especiales)
+      const validStates = US_STATES.filter((state) => !["11", "60", "66", "69", "72", "74", "78"].includes(state.code))
+
+      setTotalStatesCount(validStates.length)
+      setLoadedStatesCount(0)
+
+      // Array para almacenar todas las ciudades
+      let allTopCities: any[] = []
+
+      // Procesar cada estado
+      for (const state of validStates) {
+        try {
+          // Obtener ciudades para este estado
+          const cities = await searchCitiesByState(state.code)
+
+          // Tomar solo las top N ciudades
+          const topCities = cities.slice(0, topCitiesCount).map((city) => ({
+            ...city,
+            stateName: state.name,
+          }))
+
+          // Añadir al array general
+          allTopCities = [...allTopCities, ...topCities]
+
+          // Actualizar contador de estados procesados
+          setLoadedStatesCount((prev) => prev + 1)
+        } catch (error) {
+          console.error(`Error obteniendo datos para ${state.name}:`, error)
+          // Continuar con el siguiente estado
+          setLoadedStatesCount((prev) => prev + 1)
+        }
+      }
+
+      // Ordenar todas las ciudades por población mexicana (de mayor a menor)
+      allTopCities.sort((a, b) => b.mexicanPopulation - a.mexicanPopulation)
+
+      // Actualizar el estado con los resultados
+      setTopCitiesResults(allTopCities)
+    } catch (error) {
+      console.error("Error en la búsqueda de top ciudades:", error)
+      setError(error instanceof Error ? error.message : "Error desconocido en la búsqueda")
+    } finally {
+      setIsLoadingStates(false)
+    }
+  }
+
+  // Función para exportar los datos seleccionados a un archivo CSV
+  const exportCityData = () => {
     if (stateCitiesResults.length === 0) return
 
-    // Crear contenido CSV con solo los nombres de las ciudades
-    const csvContent = "Ciudad\n" + stateCitiesResults.map((city) => city.name).join("\n")
+    // Determinar qué columnas incluir
+    const columns = []
+    const headers = []
+
+    if (selectedColumns.name) {
+      columns.push("name")
+      headers.push("Ciudad")
+    }
+    if (selectedColumns.mexicanPopulation) {
+      columns.push("mexicanPopulation")
+      headers.push("Población Mexicana")
+    }
+    if (selectedColumns.percentage) {
+      columns.push("percentage")
+      headers.push("% del Total")
+    }
+    if (selectedColumns.medianIncome) {
+      columns.push("medianIncome")
+      headers.push("Ingreso Medio")
+    }
+
+    // Si no hay columnas seleccionadas, no hacer nada
+    if (columns.length === 0) return
+
+    // Crear contenido CSV
+    let csvContent = headers.join(",") + "\n"
+
+    // Añadir filas de datos
+    csvContent += stateCitiesResults
+      .map((city) => {
+        return columns
+          .map((col) => {
+            // Formatear valores especiales
+            if (col === "percentage") return `${city[col]}%`
+            if (col === "medianIncome") return `$${city[col]}`
+            return city[col]
+          })
+          .join(",")
+      })
+      .join("\n")
 
     // Crear un blob con el contenido CSV
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
@@ -323,12 +440,84 @@ export function SpecificSearch() {
     // Configurar el enlace
     const stateName = US_STATES.find((state) => state.code === selectedState)?.name || "Estado"
     link.setAttribute("href", url)
-    link.setAttribute("download", `ciudades_mexicanas_${stateName.toLowerCase().replace(/\s+/g, "_")}.csv`)
+    link.setAttribute("download", `datos_ciudades_mexicanas_${stateName.toLowerCase().replace(/\s+/g, "_")}.csv`)
 
     // Añadir el enlace al documento, hacer clic y luego eliminarlo
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
+
+    // Cerrar el diálogo
+    setExportDialogOpen(false)
+  }
+
+  // Función para exportar los datos de las top ciudades
+  const exportTopCitiesData = () => {
+    if (topCitiesResults.length === 0) return
+
+    // Determinar qué columnas incluir
+    const columns = []
+    const headers = []
+
+    if (selectedColumns.name) {
+      columns.push("name")
+      headers.push("Ciudad")
+    }
+    if (selectedColumns.stateName) {
+      columns.push("stateName")
+      headers.push("Estado")
+    }
+    if (selectedColumns.mexicanPopulation) {
+      columns.push("mexicanPopulation")
+      headers.push("Población Mexicana")
+    }
+    if (selectedColumns.percentage) {
+      columns.push("percentage")
+      headers.push("% del Total")
+    }
+    if (selectedColumns.medianIncome) {
+      columns.push("medianIncome")
+      headers.push("Ingreso Medio")
+    }
+
+    // Si no hay columnas seleccionadas, no hacer nada
+    if (columns.length === 0) return
+
+    // Crear contenido CSV
+    let csvContent = headers.join(",") + "\n"
+
+    // Añadir filas de datos
+    csvContent += topCitiesResults
+      .map((city) => {
+        return columns
+          .map((col) => {
+            // Formatear valores especiales
+            if (col === "percentage") return `${city[col]}%`
+            if (col === "medianIncome") return `${city[col]}`
+            return city[col]
+          })
+          .join(",")
+      })
+      .join("\n")
+
+    // Crear un blob con el contenido CSV
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
+
+    // Crear un enlace para descargar el archivo
+    const link = document.createElement("a")
+    const url = URL.createObjectURL(blob)
+
+    // Configurar el enlace
+    link.setAttribute("href", url)
+    link.setAttribute("download", `top_${topCitiesCount}_ciudades_mexicanas_por_estado.csv`)
+
+    // Añadir el enlace al documento, hacer clic y luego eliminarlo
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+
+    // Cerrar el diálogo
+    setExportDialogOpen(false)
   }
 
   // Función para renderizar la tabla de ciudades por estado
@@ -343,10 +532,68 @@ export function SpecificSearch() {
           <h3 className="font-medium text-lg">
             Ciudades con población mexicana en {stateName} ({stateCitiesResults.length})
           </h3>
-          <Button variant="outline" size="sm" onClick={exportCityNames} className="flex items-center gap-1">
-            <Download className="h-4 w-4" />
-            Exportar ciudades
-          </Button>
+          <Dialog open={exportDialogOpen} onOpenChange={setExportDialogOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="sm" className="flex items-center gap-1">
+                <Download className="h-4 w-4" />
+                Exportar datos
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Exportar datos de ciudades</DialogTitle>
+                <DialogDescription>Selecciona las columnas que deseas incluir en el archivo CSV.</DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-4 py-4">
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="export-name"
+                    checked={selectedColumns.name}
+                    onCheckedChange={(checked) => setSelectedColumns({ ...selectedColumns, name: checked === true })}
+                  />
+                  <Label htmlFor="export-name">Ciudad</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="export-population"
+                    checked={selectedColumns.mexicanPopulation}
+                    onCheckedChange={(checked) =>
+                      setSelectedColumns({ ...selectedColumns, mexicanPopulation: checked === true })
+                    }
+                  />
+                  <Label htmlFor="export-population">Población Mexicana</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="export-percentage"
+                    checked={selectedColumns.percentage}
+                    onCheckedChange={(checked) =>
+                      setSelectedColumns({ ...selectedColumns, percentage: checked === true })
+                    }
+                  />
+                  <Label htmlFor="export-percentage">Porcentaje del Total</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="export-income"
+                    checked={selectedColumns.medianIncome}
+                    onCheckedChange={(checked) =>
+                      setSelectedColumns({ ...selectedColumns, medianIncome: checked === true })
+                    }
+                  />
+                  <Label htmlFor="export-income">Ingreso Medio</Label>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button type="button" onClick={() => setExportDialogOpen(false)} variant="outline">
+                  Cancelar
+                </Button>
+                <Button type="button" onClick={exportCityData}>
+                  Exportar
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
 
         <div className="rounded-md border overflow-hidden">
@@ -384,6 +631,118 @@ export function SpecificSearch() {
             {renderCityDetails(selectedCityData)}
           </div>
         )}
+      </div>
+    )
+  }
+
+  // Función para renderizar la tabla de top ciudades por estado
+  const renderTopCitiesTable = () => {
+    if (topCitiesResults.length === 0) return null
+
+    return (
+      <div className="mt-4">
+        <div className="flex justify-between items-center mb-2">
+          <h3 className="font-medium text-lg">
+            Top {topCitiesCount} ciudades con mayor población mexicana por estado ({topCitiesResults.length} ciudades)
+          </h3>
+          <Dialog open={exportDialogOpen} onOpenChange={setExportDialogOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="sm" className="flex items-center gap-1">
+                <Download className="h-4 w-4" />
+                Exportar datos
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Exportar datos de ciudades</DialogTitle>
+                <DialogDescription>Selecciona las columnas que deseas incluir en el archivo CSV.</DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-4 py-4">
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="export-name"
+                    checked={selectedColumns.name}
+                    onCheckedChange={(checked) => setSelectedColumns({ ...selectedColumns, name: checked === true })}
+                  />
+                  <Label htmlFor="export-name">Ciudad</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="export-state"
+                    checked={selectedColumns.stateName}
+                    onCheckedChange={(checked) =>
+                      setSelectedColumns({ ...selectedColumns, stateName: checked === true })
+                    }
+                  />
+                  <Label htmlFor="export-state">Estado</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="export-population"
+                    checked={selectedColumns.mexicanPopulation}
+                    onCheckedChange={(checked) =>
+                      setSelectedColumns({ ...selectedColumns, mexicanPopulation: checked === true })
+                    }
+                  />
+                  <Label htmlFor="export-population">Población Mexicana</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="export-percentage"
+                    checked={selectedColumns.percentage}
+                    onCheckedChange={(checked) =>
+                      setSelectedColumns({ ...selectedColumns, percentage: checked === true })
+                    }
+                  />
+                  <Label htmlFor="export-percentage">Porcentaje del Total</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="export-income"
+                    checked={selectedColumns.medianIncome}
+                    onCheckedChange={(checked) =>
+                      setSelectedColumns({ ...selectedColumns, medianIncome: checked === true })
+                    }
+                  />
+                  <Label htmlFor="export-income">Ingreso Medio</Label>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button type="button" onClick={() => setExportDialogOpen(false)} variant="outline">
+                  Cancelar
+                </Button>
+                <Button type="button" onClick={exportTopCitiesData}>
+                  Exportar
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
+
+        <div className="rounded-md border overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Ciudad</TableHead>
+                <TableHead>Estado</TableHead>
+                <TableHead className="text-right">Población Mexicana</TableHead>
+                <TableHead className="text-right">% del Total</TableHead>
+                <TableHead className="text-right">Ingreso Medio</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {topCitiesResults.map((city) => (
+                <TableRow key={`${city.stateCode}-${city.placeId}`}>
+                  <TableCell className="font-medium">{city.name}</TableCell>
+                  <TableCell>{city.stateName}</TableCell>
+                  <TableCell className="text-right">{city.mexicanPopulation.toLocaleString()}</TableCell>
+                  <TableCell className="text-right">{city.percentage}%</TableCell>
+                  <TableCell className="text-right">${city.medianIncome.toLocaleString()}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
       </div>
     )
   }
@@ -485,6 +844,7 @@ export function SpecificSearch() {
     setSearchResults(null)
     setStateCitiesResults([])
     setSelectedCityData(null)
+    setTopCitiesResults([])
 
     try {
       switch (searchType) {
@@ -594,6 +954,12 @@ export function SpecificSearch() {
           >
             Barrios
           </Button>
+          <Button
+            variant={searchType === "topCities" ? "default" : "outline"}
+            onClick={() => setSearchType("topCities")}
+          >
+            Top Ciudades
+          </Button>
           <Button variant={searchType === "location" ? "default" : "outline"} onClick={() => setSearchType("location")}>
             Ubicación Específica
           </Button>
@@ -627,6 +993,42 @@ export function SpecificSearch() {
             <p className="text-xs text-gray-500 mt-1">
               Muestra todas las ciudades con población mexicana en el estado seleccionado
             </p>
+          </div>
+        ) : searchType === "topCities" ? (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <div className="flex justify-between items-center">
+                <label htmlFor="top-cities-count" className="text-sm font-medium">
+                  Número de ciudades por estado
+                </label>
+                <span className="text-sm font-medium">{topCitiesCount}</span>
+              </div>
+              <input
+                id="top-cities-count"
+                type="range"
+                min="1"
+                max="20"
+                value={topCitiesCount}
+                onChange={(e) => setTopCitiesCount(Number.parseInt(e.target.value))}
+                className="w-full"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Selecciona cuántas ciudades con mayor población mexicana quieres ver de cada estado
+              </p>
+            </div>
+            <Button onClick={fetchTopCitiesByState} disabled={isLoadingStates} className="w-full">
+              {isLoadingStates ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  Cargando ({loadedStatesCount}/{totalStatesCount})
+                </>
+              ) : (
+                <>
+                  <Search className="h-4 w-4 mr-2" />
+                  Buscar Top Ciudades
+                </>
+              )}
+            </Button>
           </div>
         ) : searchType === "city" ? (
           <div className="space-y-2">
@@ -716,6 +1118,7 @@ export function SpecificSearch() {
 
         {searchResults && renderResults()}
         {stateCitiesResults.length > 0 && renderStateCitiesTable()}
+        {topCitiesResults.length > 0 && renderTopCitiesTable()}
       </CardContent>
       <CardFooter className="flex flex-col items-start text-xs text-gray-500">
         <p className="mb-1">
