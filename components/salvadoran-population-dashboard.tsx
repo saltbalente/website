@@ -18,6 +18,7 @@ import { fetchSalvadoranPopulationData, applyDemographicFilters } from "@/lib/sa
 import type { LocationData } from "@/types/census"
 import { ApiKeyConfig } from "@/components/api-key-config"
 import { getSalvadoranBackupData } from "@/lib/salvadoran-backup-data"
+import { SalvadoranComparisonCharts } from "@/components/salvadoran-comparison-charts"
 
 export function SalvadoranPopulationDashboard() {
   const [searchTerm, setSearchTerm] = useState("")
@@ -246,6 +247,19 @@ export function SalvadoranPopulationDashboard() {
             </CardContent>
           </Card>
         </div>
+      </div>
+
+      <div className="mt-8">
+        <Card>
+          <CardHeader>
+            <CardTitle>Análisis Comparativo Avanzado</CardTitle>
+            <CardDescription>Visualización detallada de datos demográficos salvadoreños</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <SalvadoranComparisonCharts data={filteredData} />
+          </CardContent>
+          <CardFooter className="text-sm text-gray-500">Fuente: U.S. Census Bureau - Datos actualizados</CardFooter>
+        </Card>
       </div>
 
       <Card className="mt-8">

@@ -21,7 +21,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { fetchDataByZipCode, fetchLocationSpecificData } from "@/lib/census-api"
+import { fetchDataByZipCode, fetchLocationSpecificData, fetchNeighborhoodsByCity } from "@/lib/census-api"
 import { NeighborhoodExplorer } from "@/components/neighborhood-explorer"
 
 // Lista de estados de EE.UU. con sus códigos
@@ -121,6 +121,7 @@ export function SpecificSearch() {
     percentage: false,
     medianIncome: false,
   })
+  const [neighborhoods, setNeighborhoods] = useState<any[]>([])
 
   // Estados para la comparación de estados
   const [selectedStates, setSelectedStates] = useState<string[]>([])
@@ -141,6 +142,55 @@ export function SpecificSearch() {
   // Validar ID de lugar
   const validatePlaceId = (place: string): boolean => {
     return /^\d+$/.test(place)
+  }
+
+  // Función para normalizar nombres de barrios
+  const normalizeNeighborhoodName = (name: string): string => {
+    // Lista de sufijos comunes a eliminar
+    const suffixesToRemove = [
+      " Park",
+      " Valley",
+      " Heights",
+      " Hills",
+      " Gardens",
+      " District",
+      " Area",
+      " Zone",
+      " Community",
+      " Neighborhood",
+      " Square",
+      " Terrace",
+      " North",
+      " South",
+      " East",
+      " West",
+      " Central",
+      " Downtown",
+      " Uptown",
+    ]
+
+    // Normalizar el nombre eliminando sufijos
+    let normalizedName = name
+
+    // Primero intentar encontrar el nombre base (como "East Los Angeles")
+    const baseNameMatch = name.match(
+      /(North|South|East|West|Central|Downtown|Uptown)?\s?([A-Za-z\s]+?)(?:\s(?:Park|Valley|Heights|Hills|Gardens|District|Area|Zone|Community|Neighborhood|Square|Terrace))?$/,
+    )
+
+    if (baseNameMatch && baseNameMatch[2]) {
+      // Si encontramos un nombre base, usarlo como nombre normalizado
+      normalizedName = (baseNameMatch[1] ? baseNameMatch[1] + " " : "") + baseNameMatch[2].trim()
+    } else {
+      // Si no encontramos un patrón claro, eliminar sufijos conocidos
+      for (const suffix of suffixesToRemove) {
+        if (normalizedName.endsWith(suffix)) {
+          normalizedName = normalizedName.slice(0, -suffix.length).trim()
+          break
+        }
+      }
+    }
+
+    return normalizedName
   }
 
   // Función para añadir o quitar un estado de la selección
@@ -1118,11 +1168,12 @@ export function SpecificSearch() {
 
     return (
       <Tabs defaultValue="general" className="w-full">
-        <TabsList className="grid grid-cols-4 mb-4">
+        <TabsList className="grid grid-cols-5 mb-4">
           <TabsTrigger value="general">General</TabsTrigger>
           <TabsTrigger value="demographic">Demografía</TabsTrigger>
           <TabsTrigger value="economic">Económico</TabsTrigger>
           <TabsTrigger value="education">Educación</TabsTrigger>
+          <TabsTrigger value="neighborhoods">Barrios</TabsTrigger>
         </TabsList>
 
         <TabsContent value="general" className="bg-gray-50 rounded-md p-4">
@@ -1170,6 +1221,113 @@ export function SpecificSearch() {
                 <div>{String(value)}</div>
               </div>
             ))}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="neighborhoods" className="bg-gray-50 rounded-md p-4">
+          <h4 className="font-medium mb-2">Barrios con Población Mexicana</h4>
+          <div className="space-y-4">
+            <p className="text-sm text-gray-500">
+              Estos son los barrios con mayor concentración de población mexicana en esta ciudad.
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (cityData && cityData["Código de Estado"] && cityData["ID de Lugar"]) {
+                  setIsLoading(true)
+                  fetchNeighborhoodsByCity(cityData["Código de Estado"], cityData["ID de Lugar"])
+                    .then((fetchedNeighborhoods) => {
+                      // Agrupar barrios con nombres similares
+                      const groupedNeighborhoods = new Map()
+
+                      fetchedNeighborhoods.forEach((neighborhood) => {
+                        const normalizedName = normalizeNeighborhoodName(neighborhood.name)
+
+                        if (groupedNeighborhoods.has(normalizedName)) {
+                          // Si ya existe un grupo con este nombre, sumar los datos
+                          const existingGroup = groupedNeighborhoods.get(normalizedName)
+                          existingGroup.totalPopulation += neighborhood.totalPopulation
+                          existingGroup.mexicanPopulation += neighborhood.mexicanPopulation
+
+                          // Añadir el código postal si no está ya incluido
+                          if (!existingGroup.zipCode.includes(neighborhood.zipCode)) {
+                            existingGroup.zipCode = existingGroup.zipCode + ", " + neighborhood.zipCode
+                          }
+
+                          // Recalcular el porcentaje
+                          existingGroup.percentage =
+                            existingGroup.totalPopulation > 0
+                              ? Number.parseFloat(
+                                  ((existingGroup.mexicanPopulation / existingGroup.totalPopulation) * 100).toFixed(1),
+                                )
+                              : 0
+                        } else {
+                          // Si no existe, crear un nuevo grupo
+                          groupedNeighborhoods.set(normalizedName, {
+                            ...neighborhood,
+                            name: normalizedName, // Usar el nombre normalizado
+                          })
+                        }
+                      })
+
+                      // Convertir el mapa a un array y ordenar por población mexicana
+                      const unifiedNeighborhoods = Array.from(groupedNeighborhoods.values()).sort(
+                        (a, b) => b.mexicanPopulation - a.mexicanPopulation,
+                      )
+
+                      setNeighborhoods(unifiedNeighborhoods)
+                      setIsLoading(false)
+                    })
+                    .catch((error) => {
+                      console.error("Error fetching neighborhoods:", error)
+                      setError("Error al obtener datos de barrios")
+                      setIsLoading(false)
+                    })
+                }
+              }}
+              disabled={isLoading || !cityData}
+              className="mb-2"
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  Cargando barrios...
+                </>
+              ) : (
+                <>
+                  <Search className="h-4 w-4 mr-2" />
+                  Cargar datos de barrios
+                </>
+              )}
+            </Button>
+
+            {neighborhoods && neighborhoods.length > 0 ? (
+              <div className="rounded-md border overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Barrio</TableHead>
+                      <TableHead className="text-right">Población Mexicana</TableHead>
+                      <TableHead className="text-right">% del Total</TableHead>
+                      <TableHead className="text-right">Código Postal</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {neighborhoods.map((neighborhood, index) => (
+                      <TableRow key={index}>
+                        <TableCell className="font-medium">{neighborhood.name}</TableCell>
+                        <TableCell className="text-right">{neighborhood.mexicanPopulation.toLocaleString()}</TableCell>
+                        <TableCell className="text-right">{neighborhood.percentage}%</TableCell>
+                        <TableCell className="text-right">{neighborhood.zipCode}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : neighborhoods && neighborhoods.length === 0 ? (
+              <div className="text-center p-4 text-gray-500">No se encontraron datos de barrios para esta ciudad.</div>
+            ) : null}
           </div>
         </TabsContent>
       </Tabs>

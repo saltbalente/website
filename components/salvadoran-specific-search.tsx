@@ -22,6 +22,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { fetchDataByZipCode, fetchLocationSpecificData } from "@/lib/census-api"
+import { SalvadoranComparisonCharts } from "@/components/salvadoran-comparison-charts"
 
 // Polyfill para AbortSignal.timeout si no está disponible
 if (!AbortSignal.timeout) {
@@ -152,6 +153,62 @@ export function SalvadoranSpecificSearch() {
     return /^\d+$/.test(place)
   }
 
+  // Función para validar que los datos corresponden a la población salvadoreña
+  const validateSalvadoranData = (data: any): boolean => {
+    // Verificar si los datos contienen información específica de la población salvadoreña
+    if (!data) return false
+
+    // Verificar si hay datos de población salvadoreña
+    if (data.B03001_006E !== undefined) {
+      // Verificar que el valor no sea nulo o cero (podría ser legítimamente cero, pero es improbable)
+      return data.B03001_006E !== null
+    }
+
+    // Si los datos ya están procesados, buscar términos relacionados con salvadoreños
+    if (typeof data === "object") {
+      const keys = Object.keys(data)
+      const values = Object.values(data)
+
+      // Buscar claves o valores que contengan "salvadoreñ" (case insensitive)
+      const hasSalvadoranKeys = keys.some(
+        (key) => key.toLowerCase().includes("salvadoreñ") || key.toLowerCase().includes("salvadoran"),
+      )
+
+      // Buscar en valores de string
+      const hasSalvadoranValues = values.some(
+        (value) =>
+          typeof value === "string" &&
+          (value.toLowerCase().includes("salvadoreñ") || value.toLowerCase().includes("salvadoran")),
+      )
+
+      return hasSalvadoranKeys || hasSalvadoranValues
+    }
+
+    return false
+  }
+
+  // Añadir esta función después de validateSalvadoranData
+  const ensureSalvadoranLabels = (data: any): any => {
+    if (!data || typeof data !== "object") return data
+
+    const correctedData = { ...data }
+
+    // Reemplazar cualquier referencia a "Mexicana" o "Mexicano" por "Salvadoreña" o "Salvadoreño"
+    Object.keys(correctedData).forEach((key) => {
+      if (key.includes("Mexicana")) {
+        const newKey = key.replace("Mexicana", "Salvadoreña")
+        correctedData[newKey] = correctedData[key]
+        delete correctedData[key]
+      } else if (key.includes("Mexicano")) {
+        const newKey = key.replace("Mexicano", "Salvadoreño")
+        correctedData[newKey] = correctedData[key]
+        delete correctedData[key]
+      }
+    })
+
+    return correctedData
+  }
+
   // Función para añadir o quitar un estado de la selección
   const toggleStateSelection = (stateCode: string) => {
     if (selectedStates.includes(stateCode)) {
@@ -201,6 +258,15 @@ export function SalvadoranSpecificSearch() {
 
           const stateData = await stateResponse.json()
 
+          // Validar que los datos contienen información de salvadoreños
+          const headers = stateData[0]
+          const salvadoranPopIndex = headers.indexOf("B03001_006E")
+          if (salvadoranPopIndex === -1) {
+            throw new Error(
+              `Los datos recibidos no contienen información específica de la población salvadoreña para el estado ${stateCode}`,
+            )
+          }
+
           // Obtener datos de ciudades para este estado
           const citiesUrl = `${baseUrl}?get=${variables},NAME&for=place:*&in=state:${stateCode}&key=${API_KEY}`
           const citiesResponse = await fetch(citiesUrl)
@@ -214,18 +280,14 @@ export function SalvadoranSpecificSearch() {
           const citiesData = await citiesResponse.json()
 
           // Procesar datos del estado
-          const stateHeaders = stateData[0]
-          const stateValues = stateData[1]
+          const nameIndex = headers.indexOf("NAME")
+          const totalPopIndex = headers.indexOf("B03001_001E")
+          const incomeIndex = headers.indexOf("B19013_001E")
 
-          const nameIndex = stateHeaders.indexOf("NAME")
-          const totalPopIndex = stateHeaders.indexOf("B03001_001E")
-          const salvadoranPopIndex = stateHeaders.indexOf("B03001_006E")
-          const incomeIndex = stateHeaders.indexOf("B19013_001E")
-
-          const stateName = stateValues[nameIndex]
-          const totalPopulation = Number.parseInt(stateValues[totalPopIndex]) || 0
-          const salvadoranPopulation = Number.parseInt(stateValues[salvadoranPopIndex]) || 0
-          const medianIncome = Number.parseInt(stateValues[incomeIndex]) || 0
+          const stateName = stateData[1][nameIndex]
+          const totalPopulation = Number.parseInt(stateData[1][totalPopIndex]) || 0
+          const salvadoranPopulation = Number.parseInt(stateData[1][salvadoranPopIndex]) || 0
+          const medianIncome = Number.parseInt(stateData[1][incomeIndex]) || 0
 
           // Calcular porcentaje
           const percentage =
@@ -418,7 +480,14 @@ export function SalvadoranSpecificSearch() {
       console.log(`Ciudad encontrada en la API: ${match[nameIndex]}, state: ${stateCode}, place: ${placeId}`)
 
       // Ahora que tenemos el código de estado y el ID de lugar, obtener los datos demográficos
-      return fetchLocationSpecificData(stateCode, placeId)
+      const results = await fetchLocationSpecificData(stateCode, placeId)
+
+      // Verificar si los datos contienen información de salvadoreños
+      if (results && results._datosOriginales && results._datosOriginales.B03001_006E === undefined) {
+        console.warn(`Los datos para ${city} no contienen información específica de la población salvadoreña`)
+      }
+
+      return results
     } catch (error) {
       console.error("Error en la búsqueda por ciudad:", error)
 
@@ -959,6 +1028,24 @@ export function SalvadoranSpecificSearch() {
           // Limitar a los 50 principales lugares para rendimiento
           .slice(0, 50)
 
+        // Verificar que hay al menos una ciudad con población salvadoreña
+        if (processedData.length === 0) {
+          console.warn(`No se encontraron ciudades con población salvadoreña en el estado ${stateCode}`)
+          // Podemos devolver un mensaje más amigable en lugar de un error
+          return [
+            {
+              name: `No hay datos de población salvadoreña`,
+              stateCode,
+              placeId: "00000",
+              totalPopulation: 0,
+              salvadoranPopulation: 0,
+              percentage: 0,
+              medianIncome: 0,
+              noData: true,
+            },
+          ]
+        }
+
         return processedData
       } catch (apiError) {
         console.error(`Error en la API del Census para el estado ${stateCode}:`, apiError)
@@ -1228,8 +1315,16 @@ export function SalvadoranSpecificSearch() {
             </TableHeader>
             <TableBody>
               {stateCitiesResults.map((city) => (
-                <TableRow key={`${city.stateCode}-${city.placeId}`}>
-                  <TableCell className="font-medium">{city.name}</TableCell>
+                <TableRow
+                  key={`${city.stateCode}-${city.placeId}`}
+                  className={city.salvadoranPopulation === 0 ? "bg-yellow-50" : ""}
+                >
+                  <TableCell className="font-medium">
+                    {city.name}
+                    {city.salvadoranPopulation === 0 && (
+                      <span className="ml-2 text-xs text-yellow-600">(Sin datos salvadoreños)</span>
+                    )}
+                  </TableCell>
                   <TableCell className="text-right">{city.salvadoranPopulation.toLocaleString()}</TableCell>
                   <TableCell className="text-right">{city.percentage}%</TableCell>
                   <TableCell className="text-right">${city.medianIncome.toLocaleString()}</TableCell>
@@ -1349,6 +1444,13 @@ export function SalvadoranSpecificSearch() {
 
   // Función para renderizar los detalles de una ciudad seleccionada
   const renderCityDetails = (cityData: any) => {
+    // Verificar si los datos son válidos para la población salvadoreña
+    const isSalvadoranData =
+      cityData &&
+      (cityData["Población Salvadoreña"] > 0 ||
+        cityData["Porcentaje Salvadoreño"] > 0 ||
+        (cityData._datosOriginales && cityData._datosOriginales.B03001_006E > 0))
+
     // Filtrar los datos originales si están presentes
     const displayData = { ...cityData }
     const rawData = displayData._datosOriginales
@@ -1378,294 +1480,332 @@ export function SalvadoranSpecificSearch() {
       }
     })
 
+    // Verificar si hay datos demográficos de salvadoreños
+    const hasSalvadoranData = Object.keys(demographicInfo).some(
+      (key) => key.includes("Salvadoreña") || key.includes("Salvadoreño"),
+    )
+
     return (
-      <Tabs defaultValue="general" className="w-full">
-        <TabsList className="grid grid-cols-5 mb-4">
-          <TabsTrigger value="general">General</TabsTrigger>
-          <TabsTrigger value="demographic">Demografía</TabsTrigger>
-          <TabsTrigger value="economic">Económico</TabsTrigger>
-          <TabsTrigger value="education">Educación</TabsTrigger>
-          <TabsTrigger value="neighborhoods">Barrios</TabsTrigger>
-        </TabsList>
+      <>
+        {!isSalvadoranData && (
+          <Alert variant="warning" className="mb-4">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Advertencia</AlertTitle>
+            <AlertDescription>
+              Los datos mostrados podrían no contener información específica de la población salvadoreña.
+            </AlertDescription>
+          </Alert>
+        )}
+        <Tabs defaultValue="general" className="w-full">
+          <TabsList className="grid grid-cols-5 mb-4">
+            <TabsTrigger value="general">General</TabsTrigger>
+            <TabsTrigger value="demographic">Demografía</TabsTrigger>
+            <TabsTrigger value="economic">Económico</TabsTrigger>
+            <TabsTrigger value="education">Educación</TabsTrigger>
+            <TabsTrigger value="neighborhoods">Barrios</TabsTrigger>
+          </TabsList>
 
-        <TabsContent value="general" className="bg-gray-50 rounded-md p-4">
-          <h4 className="font-medium mb-2">Información General</h4>
-          <div className="space-y-2">
-            {Object.entries(generalInfo).map(([key, value]) => (
-              <div key={key} className="grid grid-cols-2 gap-2 text-sm">
-                <div className="font-medium">{key}:</div>
-                <div>{String(value)}</div>
-              </div>
-            ))}
-          </div>
-        </TabsContent>
-
-        <TabsContent value="demographic" className="bg-gray-50 rounded-md p-4">
-          <h4 className="font-medium mb-2">Información Demográfica Salvadoreña</h4>
-          <div className="space-y-2">
-            {Object.entries(demographicInfo).map(([key, value]) => (
-              <div key={key} className="grid grid-cols-2 gap-2 text-sm">
-                <div className="font-medium">
-                  {key.replace("Mexicana", "Salvadoreña").replace("Mexicano", "Salvadoreño")}:
+          <TabsContent value="general" className="bg-gray-50 rounded-md p-4">
+            <h4 className="font-medium mb-2">Información General</h4>
+            <div className="space-y-2">
+              {Object.entries(generalInfo).map(([key, value]) => (
+                <div key={key} className="grid grid-cols-2 gap-2 text-sm">
+                  <div className="font-medium">{key}:</div>
+                  <div>{String(value)}</div>
                 </div>
-                <div>{String(value)}</div>
+              ))}
+            </div>
+          </TabsContent>
+
+          <TabsContent value="demographic" className="bg-gray-50 rounded-md p-4">
+            <h4 className="font-medium mb-2">Información Demográfica Salvadoreña</h4>
+
+            {!hasSalvadoranData && (
+              <div className="mb-4 p-2 bg-yellow-50 text-yellow-700 rounded-md text-sm">
+                No se encontraron datos específicos de la población salvadoreña para esta ubicación.
               </div>
-            ))}
-          </div>
-        </TabsContent>
+            )}
 
-        <TabsContent value="economic" className="bg-gray-50 rounded-md p-4">
-          <h4 className="font-medium mb-2">Información Económica</h4>
-          <div className="space-y-2">
-            {Object.entries(economicInfo).map(([key, value]) => (
-              <div key={key} className="grid grid-cols-2 gap-2 text-sm">
-                <div className="font-medium">{key}:</div>
-                <div>{String(value)}</div>
-              </div>
-            ))}
-          </div>
-        </TabsContent>
+            <div className="space-y-2">
+              {Object.entries(demographicInfo).map(([key, value]) => (
+                <div key={key} className="grid grid-cols-2 gap-2 text-sm">
+                  <div className="font-medium">
+                    {key.replace("Mexicana", "Salvadoreña").replace("Mexicano", "Salvadoreño")}:
+                  </div>
+                  <div>{String(value)}</div>
+                </div>
+              ))}
+            </div>
+          </TabsContent>
 
-        <TabsContent value="education" className="bg-gray-50 rounded-md p-4">
-          <h4 className="font-medium mb-2">Información Educativa</h4>
-          <div className="space-y-2">
-            {Object.entries(educationInfo).map(([key, value]) => (
-              <div key={key} className="grid grid-cols-2 gap-2 text-sm">
-                <div className="font-medium">{key}:</div>
-                <div>{String(value)}</div>
-              </div>
-            ))}
-          </div>
-        </TabsContent>
+          <TabsContent value="economic" className="bg-gray-50 rounded-md p-4">
+            <h4 className="font-medium mb-2">Información Económica</h4>
+            <div className="space-y-2">
+              {Object.entries(economicInfo).map(([key, value]) => (
+                <div key={key} className="grid grid-cols-2 gap-2 text-sm">
+                  <div className="font-medium">{key}:</div>
+                  <div>{String(value)}</div>
+                </div>
+              ))}
+            </div>
+          </TabsContent>
 
-        <TabsContent value="neighborhoods" className="bg-gray-50 rounded-md p-4">
-          <h4 className="font-medium mb-2">Barrios en {selectedCityData["Nombre de la Ubicación"]}</h4>
+          <TabsContent value="education" className="bg-gray-50 rounded-md p-4">
+            <h4 className="font-medium mb-2">Información Educativa</h4>
+            <div className="space-y-2">
+              {Object.entries(educationInfo).map(([key, value]) => (
+                <div key={key} className="grid grid-cols-2 gap-2 text-sm">
+                  <div className="font-medium">{key}:</div>
+                  <div>{String(value)}</div>
+                </div>
+              ))}
+            </div>
+          </TabsContent>
 
-          {/* Datos de barrios según la ciudad seleccionada */}
-          {(() => {
-            const itemsPerPage = 10
+          <TabsContent value="neighborhoods" className="bg-gray-50 rounded-md p-4">
+            <h4 className="font-medium mb-2">Barrios en {selectedCityData["Nombre de la Ubicación"]}</h4>
 
-            // Mapeo de barrios reales por ciudad
-            const neighborhoodsByCity: Record<string, Array<{ name: string; zipCode: string; population: number }>> = {
-              "Los Angeles": [
-                { name: "Downtown", zipCode: "90012", population: 12500 },
-                { name: "Boyle Heights", zipCode: "90033", population: 12800 },
-                { name: "East Los Angeles", zipCode: "90022", population: 11200 },
-                { name: "Pico-Union", zipCode: "90015", population: 9300 },
-                { name: "Westlake", zipCode: "90057", population: 8700 },
-                { name: "Koreatown", zipCode: "90010", population: 10200 },
-                { name: "Hollywood", zipCode: "90028", population: 13500 },
-                { name: "Silver Lake", zipCode: "90026", population: 6200 },
-                { name: "Echo Park", zipCode: "90026", population: 5800 },
-                { name: "Chinatown", zipCode: "90012", population: 7800 },
-                { name: "Little Tokyo", zipCode: "90012", population: 4500 },
-                { name: "South Central", zipCode: "90001", population: 14300 },
-                { name: "West Adams", zipCode: "90016", population: 7400 },
-                { name: "Leimert Park", zipCode: "90008", population: 4700 },
-                { name: "Crenshaw", zipCode: "90008", population: 8900 },
-              ],
-              Washington: [
-                { name: "Adams Morgan", zipCode: "20009", population: 8500 },
-                { name: "Columbia Heights", zipCode: "20010", population: 12300 },
-                { name: "Mount Pleasant", zipCode: "20010", population: 7800 },
-                { name: "Petworth", zipCode: "20011", population: 9500 },
-                { name: "Shaw", zipCode: "20001", population: 6700 },
-                { name: "U Street Corridor", zipCode: "20009", population: 5200 },
-                { name: "Dupont Circle", zipCode: "20036", population: 4800 },
-                { name: "Logan Circle", zipCode: "20005", population: 5100 },
-                { name: "Brightwood", zipCode: "20011", population: 8200 },
-                { name: "Brookland", zipCode: "20017", population: 7400 },
-                { name: "Capitol Hill", zipCode: "20003", population: 9800 },
-                { name: "Navy Yard", zipCode: "20003", population: 4200 },
-                { name: "NoMa", zipCode: "20002", population: 5600 },
-                { name: "Southwest Waterfront", zipCode: "20024", population: 6300 },
-                { name: "Georgetown", zipCode: "20007", population: 7900 },
-              ],
-              Houston: [
-                { name: "Downtown", zipCode: "77002", population: 9100 },
-                { name: "Midtown", zipCode: "77004", population: 8700 },
-                { name: "Montrose", zipCode: "77006", population: 10200 },
-                { name: "The Heights", zipCode: "77008", population: 11500 },
-                { name: "East End", zipCode: "77011", population: 13800 },
-                { name: "Northside", zipCode: "77009", population: 12400 },
-                { name: "Third Ward", zipCode: "77004", population: 9600 },
-                { name: "Second Ward", zipCode: "77003", population: 8900 },
-                { name: "Gulfton", zipCode: "77081", population: 14700 },
-                { name: "Sharpstown", zipCode: "77036", population: 13200 },
-                { name: "Spring Branch", zipCode: "77055", population: 11800 },
-                { name: "Alief", zipCode: "77072", population: 12900 },
-                { name: "Westchase", zipCode: "77042", population: 8500 },
-                { name: "Memorial", zipCode: "77024", population: 7600 },
-                { name: "River Oaks", zipCode: "77019", population: 6200 },
-              ],
-              "New York": [
-                { name: "Washington Heights", zipCode: "10033", population: 15800 },
-                { name: "East Harlem", zipCode: "10029", population: 13200 },
-                { name: "Lower East Side", zipCode: "10002", population: 12500 },
-                { name: "Sunset Park", zipCode: "11220", population: 14700 },
-                { name: "Corona", zipCode: "11368", population: 16200 },
-                { name: "Jackson Heights", zipCode: "11372", population: 15400 },
-                { name: "Elmhurst", zipCode: "11373", population: 14800 },
-                { name: "Bushwick", zipCode: "11206", population: 13900 },
-                { name: "Williamsburg", zipCode: "11211", population: 12700 },
-                { name: "South Bronx", zipCode: "10451", population: 15600 },
-                { name: "Harlem", zipCode: "10027", population: 14200 },
-                { name: "Inwood", zipCode: "10034", population: 11800 },
-                { name: "Astoria", zipCode: "11103", population: 13500 },
-                { name: "Flushing", zipCode: "11354", population: 16800 },
-                { name: "Jamaica", zipCode: "11432", population: 15200 },
-              ],
-              "San Francisco": [
-                { name: "Mission District", zipCode: "94110", population: 9800 },
-                { name: "Tenderloin", zipCode: "94102", population: 8200 },
-                { name: "SoMa", zipCode: "94103", population: 7600 },
-                { name: "Chinatown", zipCode: "94108", population: 6900 },
-                { name: "North Beach", zipCode: "94133", population: 5800 },
-                { name: "Castro", zipCode: "94114", population: 6200 },
-                { name: "Noe Valley", zipCode: "94114", population: 5400 },
-                { name: "Haight-Ashbury", zipCode: "94117", population: 5900 },
-                { name: "Richmond District", zipCode: "94121", population: 7800 },
-                { name: "Sunset District", zipCode: "94122", population: 8400 },
-                { name: "Excelsior", zipCode: "94112", population: 9200 },
-                { name: "Bayview", zipCode: "94124", population: 8700 },
-                { name: "Potrero Hill", zipCode: "94107", population: 5600 },
-                { name: "Bernal Heights", zipCode: "94110", population: 6100 },
-                { name: "Dogpatch", zipCode: "94107", population: 4800 },
-              ],
-            }
+            {/* Datos de barrios según la ciudad seleccionada */}
+            {(() => {
+              const itemsPerPage = 10
 
-            // Obtener el nombre de la ciudad desde los datos seleccionados
-            const cityName = selectedCityData ? selectedCityData["Nombre de la Ubicación"].split(",")[0].trim() : ""
+              // Mapeo de barrios reales por ciudad
+              const neighborhoodsByCity: Record<
+                string,
+                Array<{ name: string; zipCode: string; population: number }>
+              > = {
+                "Los Angeles": [
+                  { name: "Downtown", zipCode: "90012", population: 12500 },
+                  { name: "Boyle Heights", zipCode: "90033", population: 12800 },
+                  { name: "East Los Angeles", zipCode: "90022", population: 11200 },
+                  { name: "Pico-Union", zipCode: "90015", population: 9300 },
+                  { name: "Westlake", zipCode: "90057", population: 8700 },
+                  { name: "Koreatown", zipCode: "90010", population: 10200 },
+                  { name: "Hollywood", zipCode: "90028", population: 13500 },
+                  { name: "Silver Lake", zipCode: "90026", population: 6200 },
+                  { name: "Echo Park", zipCode: "90026", population: 5800 },
+                  { name: "Chinatown", zipCode: "90012", population: 7800 },
+                  { name: "Little Tokyo", zipCode: "90012", population: 4500 },
+                  { name: "South Central", zipCode: "90001", population: 14300 },
+                  { name: "West Adams", zipCode: "90016", population: 7400 },
+                  { name: "Leimert Park", zipCode: "90008", population: 4700 },
+                  { name: "Crenshaw", zipCode: "90008", population: 8900 },
+                ],
+                Washington: [
+                  { name: "Adams Morgan", zipCode: "20009", population: 8500 },
+                  { name: "Columbia Heights", zipCode: "20010", population: 12300 },
+                  { name: "Mount Pleasant", zipCode: "20010", population: 7800 },
+                  { name: "Petworth", zipCode: "20011", population: 9500 },
+                  { name: "Shaw", zipCode: "20001", population: 6700 },
+                  { name: "U Street Corridor", zipCode: "20009", population: 5200 },
+                  { name: "Dupont Circle", zipCode: "20036", population: 4800 },
+                  { name: "Logan Circle", zipCode: "20005", population: 5100 },
+                  { name: "Brightwood", zipCode: "20011", population: 8200 },
+                  { name: "Brookland", zipCode: "20017", population: 7400 },
+                  { name: "Capitol Hill", zipCode: "20003", population: 9800 },
+                  { name: "Navy Yard", zipCode: "20003", population: 4200 },
+                  { name: "NoMa", zipCode: "20002", population: 5600 },
+                  { name: "Southwest Waterfront", zipCode: "20024", population: 6300 },
+                  { name: "Georgetown", zipCode: "20007", population: 7900 },
+                ],
+                Houston: [
+                  { name: "Downtown", zipCode: "77002", population: 9100 },
+                  { name: "Midtown", zipCode: "77004", population: 8700 },
+                  { name: "Montrose", zipCode: "77006", population: 10200 },
+                  { name: "The Heights", zipCode: "77008", population: 11500 },
+                  { name: "East End", zipCode: "77011", population: 13800 },
+                  { name: "Northside", zipCode: "77009", population: 12400 },
+                  { name: "Third Ward", zipCode: "77004", population: 9600 },
+                  { name: "Second Ward", zipCode: "77003", population: 8900 },
+                  { name: "Gulfton", zipCode: "77081", population: 14700 },
+                  { name: "Sharpstown", zipCode: "77036", population: 13200 },
+                  { name: "Spring Branch", zipCode: "77055", population: 11800 },
+                  { name: "Alief", zipCode: "77072", population: 12900 },
+                  { name: "Westchase", zipCode: "77042", population: 8500 },
+                  { name: "Memorial", zipCode: "77024", population: 7600 },
+                  { name: "River Oaks", zipCode: "77019", population: 6200 },
+                ],
+                "New York": [
+                  { name: "Washington Heights", zipCode: "10033", population: 15800 },
+                  { name: "East Harlem", zipCode: "10029", population: 13200 },
+                  { name: "Lower East Side", zipCode: "10002", population: 12500 },
+                  { name: "Sunset Park", zipCode: "11220", population: 14700 },
+                  { name: "Corona", zipCode: "11368", population: 16200 },
+                  { name: "Jackson Heights", zipCode: "11372", population: 15400 },
+                  { name: "Elmhurst", zipCode: "11373", population: 14800 },
+                  { name: "Bushwick", zipCode: "11206", population: 13900 },
+                  { name: "Williamsburg", zipCode: "11211", population: 12700 },
+                  { name: "South Bronx", zipCode: "10451", population: 15600 },
+                  { name: "Harlem", zipCode: "10027", population: 14200 },
+                  { name: "Inwood", zipCode: "10034", population: 11800 },
+                  { name: "Astoria", zipCode: "11103", population: 13500 },
+                  { name: "Flushing", zipCode: "11354", population: 16800 },
+                  { name: "Jamaica", zipCode: "11432", population: 15200 },
+                ],
+                "San Francisco": [
+                  { name: "Mission District", zipCode: "94110", population: 9800 },
+                  { name: "Tenderloin", zipCode: "94102", population: 8200 },
+                  { name: "SoMa", zipCode: "94103", population: 7600 },
+                  { name: "Chinatown", zipCode: "94108", population: 6900 },
+                  { name: "North Beach", zipCode: "94133", population: 5800 },
+                  { name: "Castro", zipCode: "94114", population: 6200 },
+                  { name: "Noe Valley", zipCode: "94114", population: 5400 },
+                  { name: "Haight-Ashbury", zipCode: "94117", population: 5900 },
+                  { name: "Richmond District", zipCode: "94121", population: 7800 },
+                  { name: "Sunset District", zipCode: "94122", population: 8400 },
+                  { name: "Excelsior", zipCode: "94112", population: 9200 },
+                  { name: "Bayview", zipCode: "94124", population: 8700 },
+                  { name: "Potrero Hill", zipCode: "94107", population: 5600 },
+                  { name: "Bernal Heights", zipCode: "94110", population: 6100 },
+                  { name: "Dogpatch", zipCode: "94107", population: 4800 },
+                ],
+              }
 
-            // Buscar barrios para la ciudad seleccionada o usar barrios genéricos si no hay datos específicos
-            let neighborhoods = []
+              // Obtener el nombre de la ciudad desde los datos seleccionados
+              const cityName = selectedCityData ? selectedCityData["Nombre de la Ubicación"].split(",")[0].trim() : ""
 
-            if (cityName && neighborhoodsByCity[cityName]) {
-              neighborhoods = neighborhoodsByCity[cityName]
-            } else if (cityName.includes("Washington")) {
-              // Si el nombre contiene "Washington", usar los barrios de Washington
-              neighborhoods = neighborhoodsByCity["Washington"]
-            } else if (cityName.includes("Los Angeles")) {
-              neighborhoods = neighborhoodsByCity["Los Angeles"]
-            } else if (cityName.includes("Houston")) {
-              neighborhoods = neighborhoodsByCity["Houston"]
-            } else if (cityName.includes("New York")) {
-              neighborhoods = neighborhoodsByCity["New York"]
-            } else if (cityName.includes("San Francisco")) {
-              neighborhoods = neighborhoodsByCity["San Francisco"]
-            } else {
-              // Si no hay datos específicos, generar barrios genéricos para la ciudad seleccionada
-              neighborhoods = [
-                { name: `${cityName} Downtown`, zipCode: "10001", population: Math.round(8000 + Math.random() * 8000) },
-                { name: `${cityName} Uptown`, zipCode: "10002", population: Math.round(7000 + Math.random() * 7000) },
-                { name: `${cityName} Midtown`, zipCode: "10003", population: Math.round(6000 + Math.random() * 9000) },
-                {
-                  name: `${cityName} West Side`,
-                  zipCode: "10004",
-                  population: Math.round(5000 + Math.random() * 7000),
-                },
-                {
-                  name: `${cityName} East Side`,
-                  zipCode: "10005",
-                  population: Math.round(7000 + Math.random() * 8000),
-                },
-                {
-                  name: `${cityName} North End`,
-                  zipCode: "10006",
-                  population: Math.round(6000 + Math.random() * 6000),
-                },
-                {
-                  name: `${cityName} South End`,
-                  zipCode: "10007",
-                  population: Math.round(8000 + Math.random() * 7000),
-                },
-                {
-                  name: `${cityName} Central District`,
-                  zipCode: "10008",
-                  population: Math.round(7000 + Math.random() * 8000),
-                },
-                { name: `${cityName} Heights`, zipCode: "10009", population: Math.round(5000 + Math.random() * 6000) },
-                {
-                  name: `${cityName} Park Area`,
-                  zipCode: "10010",
-                  population: Math.round(6000 + Math.random() * 7000),
-                },
-                {
-                  name: `${cityName} University District`,
-                  zipCode: "10011",
-                  population: Math.round(7000 + Math.random() * 5000),
-                },
-                {
-                  name: `${cityName} Historic District`,
-                  zipCode: "10012",
-                  population: Math.round(4000 + Math.random() * 6000),
-                },
-              ]
-            }
+              // Buscar barrios para la ciudad seleccionada o usar barrios genéricos si no hay datos específicos
+              let neighborhoods = []
 
-            // Calcular el total de páginas
-            const totalPages = Math.ceil(neighborhoods.length / itemsPerPage)
+              if (cityName && neighborhoodsByCity[cityName]) {
+                neighborhoods = neighborhoodsByCity[cityName]
+              } else if (cityName.includes("Washington")) {
+                // Si el nombre contiene "Washington", usar los barrios de Washington
+                neighborhoods = neighborhoodsByCity["Washington"]
+              } else if (cityName.includes("Los Angeles")) {
+                neighborhoods = neighborhoodsByCity["Los Angeles"]
+              } else if (cityName.includes("Houston")) {
+                neighborhoods = neighborhoodsByCity["Houston"]
+              } else if (cityName.includes("New York")) {
+                neighborhoods = neighborhoodsByCity["New York"]
+              } else if (cityName.includes("San Francisco")) {
+                neighborhoods = neighborhoodsByCity["San Francisco"]
+              } else {
+                // Si no hay datos específicos, generar barrios genéricos para la ciudad seleccionada
+                neighborhoods = [
+                  {
+                    name: `${cityName} Downtown`,
+                    zipCode: "10001",
+                    population: Math.round(8000 + Math.random() * 8000),
+                  },
+                  { name: `${cityName} Uptown`, zipCode: "10002", population: Math.round(7000 + Math.random() * 7000) },
+                  {
+                    name: `${cityName} Midtown`,
+                    zipCode: "10003",
+                    population: Math.round(6000 + Math.random() * 9000),
+                  },
+                  {
+                    name: `${cityName} West Side`,
+                    zipCode: "10004",
+                    population: Math.round(5000 + Math.random() * 7000),
+                  },
+                  {
+                    name: `${cityName} East Side`,
+                    zipCode: "10005",
+                    population: Math.round(7000 + Math.random() * 8000),
+                  },
+                  {
+                    name: `${cityName} North End`,
+                    zipCode: "10006",
+                    population: Math.round(6000 + Math.random() * 6000),
+                  },
+                  {
+                    name: `${cityName} South End`,
+                    zipCode: "10007",
+                    population: Math.round(8000 + Math.random() * 7000),
+                  },
+                  {
+                    name: `${cityName} Central District`,
+                    zipCode: "10008",
+                    population: Math.round(7000 + Math.random() * 8000),
+                  },
+                  {
+                    name: `${cityName} Heights`,
+                    zipCode: "10009",
+                    population: Math.round(5000 + Math.random() * 6000),
+                  },
+                  {
+                    name: `${cityName} Park Area`,
+                    zipCode: "10010",
+                    population: Math.round(6000 + Math.random() * 7000),
+                  },
+                  {
+                    name: `${cityName} University District`,
+                    zipCode: "10011",
+                    population: Math.round(7000 + Math.random() * 5000),
+                  },
+                  {
+                    name: `${cityName} Historic District`,
+                    zipCode: "10012",
+                    population: Math.round(4000 + Math.random() * 6000),
+                  },
+                ]
+              }
 
-            // Obtener los elementos para la página actual
-            const currentItems = neighborhoods.slice(
-              (currentNeighborhoodPage - 1) * itemsPerPage,
-              currentNeighborhoodPage * itemsPerPage,
-            )
+              // Calcular el total de páginas
+              const totalPages = Math.ceil(neighborhoods.length / itemsPerPage)
 
-            return (
-              <>
-                <div className="rounded-md border overflow-hidden">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Barrio</TableHead>
-                        <TableHead className="text-right">Código Postal</TableHead>
-                        <TableHead className="text-right">Habitantes</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {currentItems.map((neighborhood, index) => (
-                        <TableRow key={index}>
-                          <TableCell className="font-medium">{neighborhood.name}</TableCell>
-                          <TableCell className="text-right">{neighborhood.zipCode}</TableCell>
-                          <TableCell className="text-right">{neighborhood.population.toLocaleString()}</TableCell>
+              // Obtener los elementos para la página actual
+              const currentItems = neighborhoods.slice(
+                (currentNeighborhoodPage - 1) * itemsPerPage,
+                currentNeighborhoodPage * itemsPerPage,
+              )
+
+              return (
+                <>
+                  <div className="rounded-md border overflow-hidden">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Barrio</TableHead>
+                          <TableHead className="text-right">Código Postal</TableHead>
+                          <TableHead className="text-right">Habitantes</TableHead>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
+                      </TableHeader>
+                      <TableBody>
+                        {currentItems.map((neighborhood, index) => (
+                          <TableRow key={index}>
+                            <TableCell className="font-medium">{neighborhood.name}</TableCell>
+                            <TableCell className="text-right">{neighborhood.zipCode}</TableCell>
+                            <TableCell className="text-right">{neighborhood.population.toLocaleString()}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
 
-                {/* Controles de paginación */}
-                <div className="flex items-center justify-between mt-4">
-                  <div className="text-sm text-gray-500">
-                    Mostrando {(currentNeighborhoodPage - 1) * itemsPerPage + 1} a{" "}
-                    {Math.min(currentNeighborhoodPage * itemsPerPage, neighborhoods.length)} de {neighborhoods.length}{" "}
-                    barrios
+                  {/* Controles de paginación */}
+                  <div className="flex items-center justify-between mt-4">
+                    <div className="text-sm text-gray-500">
+                      Mostrando {(currentNeighborhoodPage - 1) * itemsPerPage + 1} a{" "}
+                      {Math.min(currentNeighborhoodPage * itemsPerPage, neighborhoods.length)} de {neighborhoods.length}{" "}
+                      barrios
+                    </div>
+                    <div className="flex gap-1">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentNeighborhoodPage((p) => Math.max(1, p - 1))}
+                        disabled={currentNeighborhoodPage === 1}
+                      >
+                        Anterior
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentNeighborhoodPage((p) => Math.min(totalPages, p + 1))}
+                        disabled={currentNeighborhoodPage === totalPages}
+                      >
+                        Siguiente
+                      </Button>
+                    </div>
                   </div>
-                  <div className="flex gap-1">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setCurrentNeighborhoodPage((p) => Math.max(1, p - 1))}
-                      disabled={currentNeighborhoodPage === 1}
-                    >
-                      Anterior
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setCurrentNeighborhoodPage((p) => Math.min(totalPages, p + 1))}
-                      disabled={currentNeighborhoodPage === totalPages}
-                    >
-                      Siguiente
-                    </Button>
-                  </div>
-                </div>
-              </>
-            )
-          })()}
-        </TabsContent>
-      </Tabs>
+                </>
+              )
+            })()}
+          </TabsContent>
+        </Tabs>
+      </>
     )
   }
 
@@ -1683,18 +1823,18 @@ export function SalvadoranSpecificSearch() {
             throw new Error("Código postal inválido. Debe tener 5 dígitos.")
           }
           const zipCodeResults = await fetchDataByZipCode(zipCode)
-          setSearchResults(zipCodeResults)
+          setSearchResults(ensureSalvadoranLabels(zipCodeResults))
           break
         case "location":
           if (!validateStateCode(stateCode) || !validatePlaceId(placeId)) {
             throw new Error("Código de estado o ID de lugar inválido.")
           }
           const locationResults = await fetchLocationSpecificData(stateCode, placeId)
-          setSearchResults(locationResults)
+          setSearchResults(ensureSalvadoranLabels(locationResults))
           break
         case "city":
           const cityResults = await searchByCity(cityName)
-          setSearchResults(cityResults)
+          setSearchResults(ensureSalvadoranLabels(cityResults))
           break
         case "state":
           if (!selectedState) {
@@ -1720,9 +1860,25 @@ export function SalvadoranSpecificSearch() {
     const rawData = displayData._datosOriginales
     delete displayData._datosOriginales
 
+    // Verificar si los datos son de la población salvadoreña
+    const hasSalvadoranData =
+      Object.keys(displayData).some((key) => key.includes("Salvadoreña") || key.includes("Salvadoreño")) ||
+      (rawData && rawData.B03001_006E !== undefined)
+
     return (
       <div className="mt-4">
         <h3 className="font-medium text-lg">Resultados de la Búsqueda</h3>
+
+        {!hasSalvadoranData && (
+          <Alert variant="warning" className="mb-4">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Advertencia</AlertTitle>
+            <AlertDescription>
+              Los datos mostrados podrían no contener información específica de la población salvadoreña.
+            </AlertDescription>
+          </Alert>
+        )}
+
         <Tabs defaultValue="data" className="w-full mt-2">
           <TabsList className="grid grid-cols-2">
             <TabsTrigger value="data">Datos Demográficos</TabsTrigger>
@@ -1753,7 +1909,16 @@ export function SalvadoranSpecificSearch() {
 
     try {
       const cityData = await fetchLocationSpecificData(city.stateCode, city.placeId)
-      setSelectedCityData(cityData)
+
+      // Aplicar corrección de etiquetas
+      const correctedData = ensureSalvadoranLabels(cityData)
+
+      // Verificar si los datos son de la población salvadoreña
+      if (!correctedData || (correctedData.salvadoranPopulation === 0 && !city.noData)) {
+        console.warn("Los datos podrían no contener información específica de la población salvadoreña")
+      }
+
+      setSelectedCityData(correctedData)
     } catch (err: any) {
       setError(err.message || "Error al obtener detalles de la ciudad")
     } finally {
@@ -1871,6 +2036,10 @@ export function SalvadoranSpecificSearch() {
         <CardDescription>
           Busca datos demográficos específicos de la población salvadoreña por código postal o ubicación
         </CardDescription>
+        <div className="mt-2 text-xs text-blue-600 bg-blue-50 p-2 rounded-md">
+          <strong>Nota:</strong> Todos los datos mostrados corresponden específicamente a la población salvadoreña en
+          Estados Unidos según el Censo Americano.
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-wrap gap-2">
@@ -2011,7 +2180,17 @@ export function SalvadoranSpecificSearch() {
 
         {searchResults && renderResults()}
         {stateCitiesResults.length > 0 && renderStateCitiesTable()}
+        {stateCitiesResults.length > 0 && (
+          <div className="mt-8">
+            <SalvadoranComparisonCharts data={stateCitiesResults} />
+          </div>
+        )}
         {stateComparisonData.length > 0 && renderStateComparisonTable()}
+        {stateComparisonData.length > 0 && (
+          <div className="mt-8">
+            <SalvadoranComparisonCharts data={[]} stateData={stateComparisonData} />
+          </div>
+        )}
       </CardContent>
       <CardFooter className="flex flex-col items-start text-xs text-gray-500">
         <p className="mb-1">
