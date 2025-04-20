@@ -1,11 +1,9 @@
 "use client"
 
 import { useState } from "react"
-import { Search, Loader2, AlertCircle, Download, BarChart } from "lucide-react"
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
+import { Loader2, Download, Search } from "lucide-react"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -20,9 +18,8 @@ import {
 } from "@/components/ui/dialog"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
-import { Badge } from "@/components/ui/badge"
-import { fetchDataByZipCode, fetchLocationSpecificData, fetchNeighborhoodsByCity } from "@/lib/census-api"
-import { NeighborhoodExplorer } from "@/components/neighborhood-explorer"
+import { Input } from "@/components/ui/input"
+import { fetchLocationSpecificData, fetchNeighborhoodsByCity } from "@/lib/census-api"
 
 // Lista de estados de EE.UU. con sus códigos
 const US_STATES = [
@@ -95,7 +92,7 @@ const SUGGESTED_STATES = [
 
 export function SpecificSearch() {
   const [searchType, setSearchType] = useState<
-    "zipcode" | "location" | "city" | "state" | "neighborhood" | "topCities" | "compareStates"
+    "zipcode" | "location" | "city" | "state" | "neighborhood" | "topCities" | "compareStates" | "advancedFilter"
   >("zipcode")
   const [topCitiesCount, setTopCitiesCount] = useState(10)
   const [topCitiesResults, setTopCitiesResults] = useState<any[]>([])
@@ -129,6 +126,30 @@ export function SpecificSearch() {
   const [comparisonMetric, setComparisonMetric] = useState<"population" | "percentage" | "cities">("population")
   const [isLoadingComparison, setIsLoadingComparison] = useState(false)
 
+  const [advancedFilterState, setAdvancedFilterState] = useState("")
+  const [filteredCities, setFilteredCities] = useState<any[]>([])
+  const [filterCriteria, setFilterCriteria] = useState<{
+    minPopulation: number
+    maxPopulation: number
+    minPercentage: number
+    maxPercentage: number
+    minIncome: number
+    maxIncome: number
+    sortBy: "population" | "percentage" | "income"
+    sortOrder: "asc" | "desc"
+  }>({
+    minPopulation: 0,
+    maxPopulation: 1000000,
+    minPercentage: 0,
+    maxPercentage: 100,
+    minIncome: 0,
+    maxIncome: 200000,
+    sortBy: "population",
+    sortOrder: "desc",
+  })
+
+  const [cityLimit, setCityLimit] = useState(50)
+
   // Validar código postal
   const validateZipCode = (zip: string): boolean => {
     return /^\d{5}$/.test(zip)
@@ -146,49 +167,210 @@ export function SpecificSearch() {
 
   // Función para normalizar nombres de barrios
   const normalizeNeighborhoodName = (name: string): string => {
-    // Lista de sufijos comunes a eliminar
+    // Convertir a minúsculas para comparaciones consistentes
+    const lowercaseName = name.toLowerCase()
+
+    // Diccionario de abreviaturas comunes y sus formas completas
+    const abbreviations: Record<string, string> = {
+      "st.": "saint",
+      "st ": "saint ",
+      "mt.": "mount",
+      "mt ": "mount ",
+      "n.": "north",
+      "n ": "north ",
+      "s.": "south",
+      "s ": "south ",
+      "e.": "east",
+      "e ": "east ",
+      "w.": "west",
+      "w ": "west ",
+      hts: "heights",
+      hgts: "heights",
+      apt: "apartments",
+      apts: "apartments",
+      ctr: "center",
+      "ctr.": "center",
+      vlg: "village",
+      "vlg.": "village",
+      gdns: "gardens",
+      "gdns.": "gardens",
+      blvd: "boulevard",
+      "blvd.": "boulevard",
+      ave: "avenue",
+      "ave.": "avenue",
+      dr: "drive",
+      "dr.": "drive",
+      ln: "lane",
+      "ln.": "lane",
+      rd: "road",
+      "rd.": "road",
+      pkwy: "parkway",
+      "pkwy.": "parkway",
+    }
+
+    // Expandir abreviaturas
+    let expandedName = lowercaseName
+    Object.entries(abbreviations).forEach(([abbr, full]) => {
+      expandedName = expandedName.replace(new RegExp(`\\b${abbr}\\b`, "g"), full)
+    })
+
+    // Lista de sufijos comunes a eliminar, ordenados del más largo al más corto para evitar eliminaciones parciales
     const suffixesToRemove = [
-      " Park",
-      " Valley",
-      " Heights",
-      " Hills",
-      " Gardens",
-      " District",
-      " Area",
-      " Zone",
-      " Community",
-      " Neighborhood",
-      " Square",
-      " Terrace",
-      " North",
-      " South",
-      " East",
-      " West",
-      " Central",
-      " Downtown",
-      " Uptown",
+      " neighborhood",
+      " metropolitan area",
+      " metropolitan",
+      " community",
+      " development",
+      " subdivision",
+      " residential",
+      " apartments",
+      " apartment",
+      " boulevard",
+      " district",
+      " gardens",
+      " heights",
+      " village",
+      " center",
+      " square",
+      " valley",
+      " estate",
+      " estates",
+      " terrace",
+      " commons",
+      " meadows",
+      " springs",
+      " hills",
+      " place",
+      " plaza",
+      " point",
+      " ridge",
+      " shores",
+      " station",
+      " corner",
+      " corners",
+      " crossing",
+      " crossings",
+      " landing",
+      " landings",
+      " manor",
+      " manors",
+      " oaks",
+      " pines",
+      " pointe",
+      " ranch",
+      " ranches",
+      " reserve",
+      " resort",
+      " run",
+      " trace",
+      " trails",
+      " view",
+      " views",
+      " vista",
+      " vistas",
+      " walk",
+      " way",
+      " woods",
+      " park",
+      " area",
+      " zone",
     ]
 
-    // Normalizar el nombre eliminando sufijos
-    let normalizedName = name
+    // Prefijos direccionales y sus variaciones
+    const directionalPrefixes = [
+      "north",
+      "northern",
+      "north east",
+      "northeast",
+      "north west",
+      "northwest",
+      "south",
+      "southern",
+      "south east",
+      "southeast",
+      "south west",
+      "southwest",
+      "east",
+      "eastern",
+      "west",
+      "western",
+      "central",
+      "downtown",
+      "uptown",
+      "midtown",
+      "inner",
+      "outer",
+      "upper",
+      "lower",
+      "old",
+      "new",
+    ]
 
-    // Primero intentar encontrar el nombre base (como "East Los Angeles")
-    const baseNameMatch = name.match(
-      /(North|South|East|West|Central|Downtown|Uptown)?\s?([A-Za-z\s]+?)(?:\s(?:Park|Valley|Heights|Hills|Gardens|District|Area|Zone|Community|Neighborhood|Square|Terrace))?$/,
-    )
+    // Patrones específicos para tipos de barrios comunes
+    const commonPatterns = [
+      /^(downtown|uptown|midtown)$/i,
+      /^(north|south|east|west|central)\s+(\w+)$/i,
+      /^(\w+)\s+(heights|hills|park|gardens|village|district|neighborhood)$/i,
+      /^(old|new)\s+(\w+)$/i,
+      /^(the)\s+(\w+)$/i,
+    ]
 
-    if (baseNameMatch && baseNameMatch[2]) {
-      // Si encontramos un nombre base, usarlo como nombre normalizado
-      normalizedName = (baseNameMatch[1] ? baseNameMatch[1] + " " : "") + baseNameMatch[2].trim()
-    } else {
-      // Si no encontramos un patrón claro, eliminar sufijos conocidos
-      for (const suffix of suffixesToRemove) {
-        if (normalizedName.endsWith(suffix)) {
-          normalizedName = normalizedName.slice(0, -suffix.length).trim()
-          break
+    // Intentar extraer el nombre base usando patrones comunes
+    let normalizedName = expandedName
+    let baseNameFound = false
+
+    // Primero, verificar si el nombre completo coincide con un patrón común
+    for (const pattern of commonPatterns) {
+      if (pattern.test(expandedName)) {
+        const match = expandedName.match(pattern)
+        if (match) {
+          // Si es un patrón direccional + nombre, mantener ambos
+          if (/^(north|south|east|west|central|downtown|uptown|midtown|old|new)$/i.test(match[1])) {
+            normalizedName = match[0]
+            baseNameFound = true
+            break
+          }
         }
       }
     }
+
+    // Si no se encontró un patrón común, intentar extraer el nombre base
+    if (!baseNameFound) {
+      // Buscar un prefijo direccional seguido de un nombre
+      const directionalPattern = new RegExp(
+        `^(${directionalPrefixes.join("|")})\\s+([\\w\\s]+?)(?:\\s+(?:${suffixesToRemove.map((s) => s.trim()).join("|")}))?$`,
+        "i",
+      )
+      const directionalMatch = expandedName.match(directionalPattern)
+
+      if (directionalMatch) {
+        // Mantener el prefijo direccional y el nombre base
+        normalizedName = `${directionalMatch[1]} ${directionalMatch[2].trim()}`
+      } else {
+        // Si no hay prefijo direccional, eliminar sufijos conocidos
+        for (const suffix of suffixesToRemove) {
+          if (normalizedName.endsWith(suffix)) {
+            normalizedName = normalizedName.slice(0, -suffix.length).trim()
+            break
+          }
+        }
+      }
+    }
+
+    // Eliminar artículos y preposiciones al inicio si quedaron
+    normalizedName = normalizedName.replace(/^(the|a|an|of|in|at|by|for)\s+/i, "")
+
+    // Eliminar números y caracteres especiales
+    normalizedName = normalizedName.replace(/[0-9#&*()[\]{}]/g, "").trim()
+
+    // Eliminar espacios múltiples
+    normalizedName = normalizedName.replace(/\s+/g, " ").trim()
+
+    // Capitalizar cada palabra para un formato consistente
+    normalizedName = normalizedName
+      .split(" ")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ")
 
     return normalizedName
   }
@@ -560,8 +742,8 @@ export function SpecificSearch() {
         .filter((place) => place.mexicanPopulation > 0)
         // Ordenar por población mexicana (de mayor a menor)
         .sort((a, b) => b.mexicanPopulation - a.mexicanPopulation)
-        // Limitar a los 50 principales lugares para rendimiento
-        .slice(0, 50)
+      // Limitar a los 50 principales lugares para rendimiento
+      // No aplicar slice aquí, ya que ahora controlamos el límite en el filtrado avanzado
 
       return processedData
     } catch (error) {
@@ -1236,11 +1418,57 @@ export function SpecificSearch() {
               onClick={() => {
                 if (cityData && cityData["Código de Estado"] && cityData["ID de Lugar"]) {
                   setIsLoading(true)
+                  // Función para determinar si dos nombres son similares
+                  const areSimilarNames = (name1: string, name2: string): boolean => {
+                    // Si los nombres son idénticos, son similares
+                    if (name1 === name2) return true
+
+                    // Si un nombre está contenido en el otro, son similares
+                    if (name1.includes(name2) || name2.includes(name1)) return true
+
+                    // Calcular la distancia de Levenshtein (número de ediciones necesarias para transformar un string en otro)
+                    const levenshteinDistance = (a: string, b: string): number => {
+                      const matrix = Array(b.length + 1)
+                        .fill(null)
+                        .map(() => Array(a.length + 1).fill(null))
+
+                      for (let i = 0; i <= a.length; i++) {
+                        matrix[0][i] = i
+                      }
+
+                      for (let j = 0; j <= b.length; j++) {
+                        matrix[j][0] = j
+                      }
+
+                      for (let j = 1; j <= b.length; j++) {
+                        for (let i = 1; i <= a.length; i++) {
+                          const substitutionCost = a[i - 1] === b[j - 1] ? 0 : 1
+                          matrix[j][i] = Math.min(
+                            matrix[j][i - 1] + 1, // eliminación
+                            matrix[j - 1][i] + 1, // inserción
+                            matrix[j - 1][i - 1] + substitutionCost, // sustitución
+                          )
+                        }
+                      }
+
+                      return matrix[b.length][a.length]
+                    }
+
+                    // Calcular la similitud basada en la distancia de Levenshtein
+                    const maxLength = Math.max(name1.length, name2.length)
+                    const distance = levenshteinDistance(name1, name2)
+                    const similarity = 1 - distance / maxLength
+
+                    // Si la similitud es mayor que un umbral (por ejemplo, 0.7 o 70%), considerar los nombres como similares
+                    return similarity > 0.7
+                  }
+
                   fetchNeighborhoodsByCity(cityData["Código de Estado"], cityData["ID de Lugar"])
                     .then((fetchedNeighborhoods) => {
                       // Agrupar barrios con nombres similares
                       const groupedNeighborhoods = new Map()
 
+                      // Primera pasada: normalizar nombres y crear grupos iniciales
                       fetchedNeighborhoods.forEach((neighborhood) => {
                         const normalizedName = normalizeNeighborhoodName(neighborhood.name)
 
@@ -1255,6 +1483,12 @@ export function SpecificSearch() {
                             existingGroup.zipCode = existingGroup.zipCode + ", " + neighborhood.zipCode
                           }
 
+                          // Guardar los nombres originales para referencia
+                          if (!existingGroup.originalNames) {
+                            existingGroup.originalNames = [existingGroup.originalName]
+                          }
+                          existingGroup.originalNames.push(neighborhood.name)
+
                           // Recalcular el porcentaje
                           existingGroup.percentage =
                             existingGroup.totalPopulation > 0
@@ -1267,42 +1501,86 @@ export function SpecificSearch() {
                           groupedNeighborhoods.set(normalizedName, {
                             ...neighborhood,
                             name: normalizedName, // Usar el nombre normalizado
+                            originalName: neighborhood.name, // Guardar el nombre original
                           })
                         }
                       })
 
-                      // Convertir el mapa a un array y ordenar por población mexicana
-                      const unifiedNeighborhoods = Array.from(groupedNeighborhoods.values()).sort(
-                        (a, b) => b.mexicanPopulation - a.mexicanPopulation,
-                      )
+                      // Segunda pasada: buscar similitudes entre nombres normalizados
+                      // Esto ayuda a unificar barrios que podrían tener variaciones menores
+                      const normalizedNames = Array.from(groupedNeighborhoods.keys())
 
-                      setNeighborhoods(unifiedNeighborhoods)
-                      setIsLoading(false)
+                      for (let i = 0; i < normalizedNames.length; i++) {
+                        const name1 = normalizedNames[i]
+
+                        // Si este nombre ya fue fusionado con otro, continuar
+                        if (!groupedNeighborhoods.has(name1)) continue
+
+                        for (let j = i + 1; j < normalizedNames.length; j++) {
+                          const name2 = normalizedNames[j]
+
+                          // Si este nombre ya fue fusionado con otro, continuar
+                          if (!groupedNeighborhoods.has(name2)) continue
+
+                          // Verificar si los nombres son muy similares (por ejemplo, "Downtown" y "Down Town")
+                          if (areSimilarNames(name1, name2)) {
+                            const group1 = groupedNeighborhoods.get(name1)
+                            const group2 = groupedNeighborhoods.get(name2)
+
+                            // Fusionar el grupo 2 en el grupo 1
+                            group1.totalPopulation += group2.totalPopulation
+                            group1.mexicanPopulation += group2.mexicanPopulation
+
+                            // Combinar códigos postales
+                            if (!group1.zipCode.includes(group2.zipCode)) {
+                              group1.zipCode = group1.zipCode + ", " + group2.zipCode
+                            }
+
+                            // Combinar nombres originales
+                            if (!group1.originalNames) {
+                              group1.originalNames = [group1.originalName]
+                            }
+                            if (!group2.originalNames) {
+                              group2.originalNames = []
+                            }
+                            group1.originalNames = group1.originalNames.concat(group2.originalNames)
+
+                            // Recalcular el porcentaje
+                            group1.percentage =
+                              group1.totalPopulation > 0
+                                ? Number.parseFloat(
+                                    ((group1.mexicanPopulation / group1.totalPopulation) * 100).toFixed(1),
+                                  )
+                                : 0
+
+                            // Eliminar el grupo 2
+                            groupedNeighborhoods.delete(name2)
+                          }
+                        }
+                      }
+
+                      // Convertir el mapa a un array
+                      const finalNeighborhoods = Array.from(groupedNeighborhoods.values())
+
+                      // Ordenar por población mexicana (de mayor a menor)
+                      finalNeighborhoods.sort((a, b) => b.mexicanPopulation - a.mexicanPopulation)
+
+                      setNeighborhoods(finalNeighborhoods)
                     })
                     .catch((error) => {
-                      console.error("Error fetching neighborhoods:", error)
-                      setError("Error al obtener datos de barrios")
+                      console.error("Error obteniendo barrios:", error)
+                      setError(error instanceof Error ? error.message : "Error desconocido al obtener barrios")
+                    })
+                    .finally(() => {
                       setIsLoading(false)
                     })
                 }
               }}
-              disabled={isLoading || !cityData}
-              className="mb-2"
+              disabled={isLoading}
             >
-              {isLoading ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  Cargando barrios...
-                </>
-              ) : (
-                <>
-                  <Search className="h-4 w-4 mr-2" />
-                  Cargar datos de barrios
-                </>
-              )}
+              {isLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : "Buscar Barrios"}
             </Button>
-
-            {neighborhoods && neighborhoods.length > 0 ? (
+            {neighborhoods.length > 0 ? (
               <div className="rounded-md border overflow-hidden">
                 <Table>
                   <TableHeader>
@@ -1310,7 +1588,7 @@ export function SpecificSearch() {
                       <TableHead>Barrio</TableHead>
                       <TableHead className="text-right">Población Mexicana</TableHead>
                       <TableHead className="text-right">% del Total</TableHead>
-                      <TableHead className="text-right">Código Postal</TableHead>
+                      <TableHead className="text-right">Códigos Postales</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1325,262 +1603,302 @@ export function SpecificSearch() {
                   </TableBody>
                 </Table>
               </div>
-            ) : neighborhoods && neighborhoods.length === 0 ? (
-              <div className="text-center p-4 text-gray-500">No se encontraron datos de barrios para esta ciudad.</div>
-            ) : null}
+            ) : (
+              <p className="text-sm text-gray-500">
+                {isLoading ? "Buscando barrios..." : "No se encontraron barrios con población mexicana en esta ciudad."}
+              </p>
+            )}
           </div>
         </TabsContent>
+
+        {showRawData && rawData && (
+          <TabsContent value="raw" className="bg-gray-50 rounded-md p-4">
+            <h4 className="font-medium mb-2">Datos Originales</h4>
+            <pre className="text-sm">{JSON.stringify(rawData, null, 2)}</pre>
+          </TabsContent>
+        )}
       </Tabs>
-    )
-  }
-
-  const handleSearch = async () => {
-    setIsLoading(true)
-    setError(null)
-    setSearchResults(null)
-    setStateCitiesResults([])
-    setSelectedCityData(null)
-    setTopCitiesResults([])
-
-    try {
-      switch (searchType) {
-        case "zipcode":
-          if (!validateZipCode(zipCode)) {
-            throw new Error("Código postal inválido. Debe tener 5 dígitos.")
-          }
-          const zipCodeResults = await fetchDataByZipCode(zipCode)
-          setSearchResults(zipCodeResults)
-          break
-        case "location":
-          if (!validateStateCode(stateCode) || !validatePlaceId(placeId)) {
-            throw new Error("Código de estado o ID de lugar inválido.")
-          }
-          const locationResults = await fetchLocationSpecificData(stateCode, placeId)
-          setSearchResults(locationResults)
-          break
-        case "city":
-          const cityResults = await searchByCity(cityName)
-          setSearchResults(cityResults)
-          break
-        case "state":
-          if (!selectedState) {
-            throw new Error("Por favor, selecciona un estado.")
-          }
-          const cities = await searchCitiesByState(selectedState)
-          setStateCitiesResults(cities)
-          break
-        default:
-          throw new Error("Tipo de búsqueda no válido")
-      }
-    } catch (err: any) {
-      setError(err.message || "Error al realizar la búsqueda")
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const renderResults = () => {
-    if (!searchResults) return null
-
-    const displayData = { ...searchResults }
-    const rawData = displayData._datosOriginales
-    delete displayData._datosOriginales
-
-    return (
-      <div className="mt-4">
-        <h3 className="font-medium text-lg">Resultados de la Búsqueda</h3>
-        <Tabs defaultValue="data" className="w-full mt-2">
-          <TabsList className="grid grid-cols-2">
-            <TabsTrigger value="data">Datos Demográficos</TabsTrigger>
-            <TabsTrigger value="raw">Datos Originales</TabsTrigger>
-          </TabsList>
-          <TabsContent value="data">
-            <div className="space-y-2">
-              {Object.entries(displayData).map(([key, value]) => (
-                <div key={key} className="grid grid-cols-2 gap-2 text-sm">
-                  <div className="font-medium">{key}:</div>
-                  <div>{String(value)}</div>
-                </div>
-              ))}
-            </div>
-          </TabsContent>
-          <TabsContent value="raw">
-            <pre className="text-xs whitespace-pre-wrap break-words">{JSON.stringify(rawData, null, 2)}</pre>
-          </TabsContent>
-        </Tabs>
-      </div>
     )
   }
 
   const handleCitySelect = async (city: any) => {
     setIsLoading(true)
     setError(null)
-    setSelectedCityData(null)
 
     try {
-      const cityData = await fetchLocationSpecificData(city.stateCode, city.placeId)
-      setSelectedCityData(cityData)
-    } catch (err: any) {
-      setError(err.message || "Error al obtener detalles de la ciudad")
+      const API_KEY = localStorage.getItem("census_api_key") || process.env.CENSUS_API_KEY
+
+      if (!API_KEY) {
+        throw new Error("Census API key is not available")
+      }
+
+      const data = await fetchLocationSpecificData(city.stateCode, city.placeId)
+      setSelectedCityData(data)
+    } catch (error) {
+      console.error("Error obteniendo detalles de la ciudad:", error)
+      setError(error instanceof Error ? error.message : "Error desconocido al obtener detalles de la ciudad")
     } finally {
       setIsLoading(false)
     }
   }
 
-  // Renderizar la interfaz de selección de estados para comparación
-  const renderStateSelectionInterface = () => {
-    return (
-      <div className="space-y-4">
-        <div>
-          <h3 className="text-sm font-medium mb-2">Selecciona los estados a comparar</h3>
-          <div className="flex flex-wrap gap-2 mb-4">
-            {selectedStates.map((stateCode) => {
-              const state = US_STATES.find((s) => s.code === stateCode)
-              return (
-                <Badge key={stateCode} variant="secondary" className="flex items-center gap-1">
-                  {state?.name}
-                  <button
-                    onClick={() => toggleStateSelection(stateCode)}
-                    className="ml-1 rounded-full hover:bg-gray-200 p-0.5"
-                  >
-                    ×
-                  </button>
-                </Badge>
-              )
-            })}
-          </div>
+  const handleSearch = async () => {
+    setIsLoading(true)
+    setError(null)
+    setSearchResults(null)
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-            {SUGGESTED_STATES.map((state) => (
-              <Button
-                key={state.code}
-                variant={selectedStates.includes(state.code) ? "default" : "outline"}
-                size="sm"
-                onClick={() => toggleStateSelection(state.code)}
-                className="justify-start"
-              >
-                {state.name}
-              </Button>
-            ))}
-          </div>
+    try {
+      switch (searchType) {
+        case "zipcode":
+          if (!validateZipCode(zipCode)) {
+            throw new Error("Por favor, ingresa un código postal válido (5 dígitos)")
+          }
+          const zipCodeData = await fetchLocationSpecificData(zipCode.substring(0, 2), zipCode)
+          setSearchResults(zipCodeData)
+          break
+        case "location":
+          if (!validateStateCode(stateCode)) {
+            throw new Error("Por favor, ingresa un código de estado válido (2 dígitos)")
+          }
+          if (!validatePlaceId(placeId)) {
+            throw new Error("Por favor, ingresa un ID de lugar válido (números)")
+          }
+          const locationData = await fetchLocationSpecificData(stateCode, placeId)
+          setSearchResults(locationData)
+          break
+        case "city":
+          const cityData = await searchByCity(cityName)
+          setSearchResults(cityData)
+          break
+        case "state":
+          if (!selectedState) {
+            throw new Error("Por favor, selecciona un estado")
+          }
+          const cities = await searchCitiesByState(selectedState)
+          setStateCitiesResults(cities)
+          break
+        case "neighborhood":
+          // Implementar búsqueda por barrio si es necesario
+          break
+        case "topCities":
+          await fetchTopCitiesByState()
+          break
+        case "compareStates":
+          await fetchStateComparisonData()
+          break
+        case "advancedFilter":
+          // La lógica para el filtro avanzado se maneja en la función applyAdvancedFilters
+          break
+        default:
+          throw new Error("Tipo de búsqueda no válido")
+      }
+    } catch (error) {
+      console.error("Error en la búsqueda:", error)
+      setError(error instanceof Error ? error.message : "Error desconocido en la búsqueda")
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
-          <details className="mt-2">
-            <summary className="cursor-pointer text-sm text-gray-500">Ver todos los estados</summary>
-            <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-              {US_STATES.filter((state) => !SUGGESTED_STATES.some((s) => s.code === state.code)).map((state) => (
+  const applyAdvancedFilters = async () => {
+    if (!advancedFilterState) {
+      setError("Por favor, selecciona un estado para aplicar los filtros avanzados")
+      return
+    }
+
+    setIsLoading(true)
+    setError(null)
+    setFilteredCities([])
+
+    try {
+      // Obtener todas las ciudades del estado seleccionado
+      const allCities = await searchCitiesByState(advancedFilterState)
+
+      // Aplicar filtros
+      const filtered = allCities.filter(
+        (city) =>
+          city.mexicanPopulation >= filterCriteria.minPopulation &&
+          city.mexicanPopulation <= filterCriteria.maxPopulation &&
+          city.percentage >= filterCriteria.minPercentage &&
+          city.percentage <= filterCriteria.maxPercentage &&
+          city.medianIncome >= filterCriteria.minIncome &&
+          city.medianIncome <= filterCriteria.maxIncome,
+      )
+
+      // Ordenar resultados
+      const sorted = [...filtered]
+      if (filterCriteria.sortBy === "population") {
+        sorted.sort((a, b) =>
+          filterCriteria.sortOrder === "desc"
+            ? b.mexicanPopulation - a.mexicanPopulation
+            : a.mexicanPopulation - b.mexicanPopulation,
+        )
+      } else if (filterCriteria.sortBy === "percentage") {
+        sorted.sort((a, b) =>
+          filterCriteria.sortOrder === "desc" ? b.percentage - a.percentage : a.percentage - b.percentage,
+        )
+      } else if (filterCriteria.sortBy === "income") {
+        sorted.sort((a, b) =>
+          filterCriteria.sortOrder === "desc" ? b.medianIncome - a.medianIncome : a.medianIncome - b.medianIncome,
+        )
+      }
+
+      // Aplicar el límite de ciudades
+      const limitedResults = sorted.slice(0, cityLimit)
+
+      setFilteredCities(limitedResults)
+    } catch (error) {
+      console.error("Error al aplicar filtros avanzados:", error)
+      setError(error instanceof Error ? error.message : "Error desconocido al aplicar filtros")
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  return (
+    <Card className="w-full">
+      <CardHeader>
+        <CardTitle>Búsqueda Específica</CardTitle>
+        <CardDescription>
+          Encuentra datos demográficos específicos por código postal, ubicación, ciudad o estado.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-4">
+        <Tabs defaultValue="zipcode" className="w-full">
+          <TabsList>
+            <TabsTrigger value="zipcode" onClick={() => setSearchType("zipcode")}>
+              Código Postal
+            </TabsTrigger>
+            <TabsTrigger value="location" onClick={() => setSearchType("location")}>
+              Ubicación
+            </TabsTrigger>
+            <TabsTrigger value="city" onClick={() => setSearchType("city")}>
+              Ciudad
+            </TabsTrigger>
+            <TabsTrigger value="state" onClick={() => setSearchType("state")}>
+              Estado
+            </TabsTrigger>
+            <TabsTrigger value="topCities" onClick={() => setSearchType("topCities")}>
+              Top Ciudades
+            </TabsTrigger>
+            <TabsTrigger value="compareStates" onClick={() => setSearchType("compareStates")}>
+              Comparar Estados
+            </TabsTrigger>
+            <TabsTrigger value="advancedFilter" onClick={() => setSearchType("advancedFilter")}>
+              Filtro Avanzado
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+
+        {error && <div className="text-red-500">{error}</div>}
+
+        {searchType === "zipcode" ? (
+          <div className="grid gap-2">
+            <Label htmlFor="zipcode">Código Postal</Label>
+            <Input
+              type="text"
+              id="zipcode"
+              placeholder="Ej. 06000"
+              value={zipCode}
+              onChange={(e) => setZipCode(e.target.value)}
+            />
+          </div>
+        ) : searchType === "location" ? (
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="state-code">Código de Estado</Label>
+              <Input
+                type="text"
+                id="state-code"
+                placeholder="Ej. 06"
+                value={stateCode}
+                onChange={(e) => setStateCode(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label htmlFor="place-id">ID de Lugar</Label>
+              <Input
+                type="text"
+                id="place-id"
+                placeholder="Ej. 44000"
+                value={placeId}
+                onChange={(e) => setPlaceId(e.target.value)}
+              />
+            </div>
+          </div>
+        ) : searchType === "city" ? (
+          <div className="grid gap-2">
+            <Label htmlFor="city-name">Nombre de la Ciudad</Label>
+            <Input
+              type="text"
+              id="city-name"
+              placeholder="Ej. Los Angeles"
+              value={cityName}
+              onChange={(e) => setCityName(e.target.value)}
+            />
+          </div>
+        ) : searchType === "state" ? (
+          <div className="space-y-2">
+            <Label htmlFor="state-select">Selecciona un Estado</Label>
+            <Select value={selectedState} onValueChange={setSelectedState}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Selecciona un estado" />
+              </SelectTrigger>
+              <SelectContent>
+                {US_STATES.map((state) => (
+                  <SelectItem key={state.code} value={state.code}>
+                    {state.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        ) : searchType === "topCities" ? (
+          <div className="space-y-2">
+            <Label htmlFor="top-cities-count">Número de Ciudades a Mostrar</Label>
+            <Input
+              type="number"
+              id="top-cities-count"
+              min="5"
+              max="50"
+              value={topCitiesCount}
+              onChange={(e) => setTopCitiesCount(Number.parseInt(e.target.value))}
+            />
+          </div>
+        ) : searchType === "compareStates" ? (
+          <div className="space-y-2">
+            <Label>Selecciona los Estados a Comparar</Label>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+              {SUGGESTED_STATES.map((state) => (
                 <Button
                   key={state.code}
                   variant={selectedStates.includes(state.code) ? "default" : "outline"}
-                  size="sm"
                   onClick={() => toggleStateSelection(state.code)}
-                  className="justify-start"
                 >
                   {state.name}
                 </Button>
               ))}
             </div>
-          </details>
-        </div>
-
-        <div>
-          <h3 className="text-sm font-medium mb-2">Ordenar resultados por</h3>
-          <div className="flex gap-2">
-            <Button
-              variant={comparisonMetric === "population" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setComparisonMetric("population")}
-            >
-              Población Mexicana
-            </Button>
-            <Button
-              variant={comparisonMetric === "percentage" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setComparisonMetric("percentage")}
-            >
-              Porcentaje
-            </Button>
-            <Button
-              variant={comparisonMetric === "cities" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setComparisonMetric("cities")}
-            >
-              Número de Ciudades
-            </Button>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+              {US_STATES.map((state) => (
+                <div key={state.code} className="flex items-center space-x-2">
+                  <Checkbox
+                    id={`state-${state.code}`}
+                    checked={selectedStates.includes(state.code)}
+                    onCheckedChange={() => toggleStateSelection(state.code)}
+                  />
+                  <Label htmlFor={`state-${state.code}`}>{state.name}</Label>
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
-
-        <Button
-          onClick={fetchStateComparisonData}
-          disabled={isLoadingComparison || selectedStates.length === 0}
-          className="w-full"
-        >
-          {isLoadingComparison ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin mr-2" />
-              Cargando datos de comparación...
-            </>
-          ) : (
-            <>
-              <BarChart className="h-4 w-4 mr-2" />
-              Comparar Estados
-            </>
-          )}
-        </Button>
-      </div>
-    )
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Búsqueda Específica</CardTitle>
-        <CardDescription>Busca datos demográficos específicos por código postal o ubicación</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="flex flex-wrap gap-2">
-          <Button variant={searchType === "zipcode" ? "default" : "outline"} onClick={() => setSearchType("zipcode")}>
-            Código Postal
-          </Button>
-          <Button variant={searchType === "city" ? "default" : "outline"} onClick={() => setSearchType("city")}>
-            Ciudad
-          </Button>
-          <Button variant={searchType === "state" ? "default" : "outline"} onClick={() => setSearchType("state")}>
-            Estado
-          </Button>
-          <Button
-            variant={searchType === "neighborhood" ? "default" : "outline"}
-            onClick={() => setSearchType("neighborhood")}
-          >
-            Barrios
-          </Button>
-          <Button
-            variant={searchType === "topCities" ? "default" : "outline"}
-            onClick={() => setSearchType("topCities")}
-          >
-            Top Ciudades
-          </Button>
-          <Button
-            variant={searchType === "compareStates" ? "default" : "outline"}
-            onClick={() => setSearchType("compareStates")}
-          >
-            Comparar Estados
-          </Button>
-          <Button variant={searchType === "location" ? "default" : "outline"} onClick={() => setSearchType("location")}>
-            Ubicación Específica
-          </Button>
-        </div>
-
-        {searchType === "neighborhood" ? (
-          <NeighborhoodExplorer />
-        ) : searchType === "compareStates" ? (
-          renderStateSelectionInterface()
-        ) : searchType === "state" ? (
-          <div className="space-y-2">
-            <label htmlFor="state-select" className="text-sm font-medium">
-              Selecciona un Estado
-            </label>
-            <div className="flex gap-2">
-              <Select value={selectedState} onValueChange={setSelectedState}>
+        ) : searchType === "advancedFilter" ? (
+          <div className="space-y-6">
+            <div className="space-y-2">
+              <label htmlFor="advanced-filter-state" className="text-sm font-medium">
+                Selecciona un Estado para Filtrar sus Ciudades
+              </label>
+              <Select value={advancedFilterState} onValueChange={setAdvancedFilterState}>
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Selecciona un estado" />
                 </SelectTrigger>
@@ -1592,155 +1910,335 @@ export function SpecificSearch() {
                   ))}
                 </SelectContent>
               </Select>
-              <Button onClick={handleSearch} disabled={isLoading}>
-                {isLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Search className="h-4 w-4 mr-2" />}
-                Buscar
-              </Button>
             </div>
-            <p className="text-xs text-gray-500 mt-1">
-              Muestra todas las ciudades con población mexicana en el estado seleccionado
-            </p>
-          </div>
-        ) : searchType === "topCities" ? (
-          <div className="space-y-4">
+
             <div className="space-y-2">
               <div className="flex justify-between items-center">
-                <label htmlFor="top-cities-count" className="text-sm font-medium">
-                  Número de ciudades por estado
+                <label htmlFor="city-limit" className="text-sm font-medium">
+                  Número de ciudades a mostrar
                 </label>
-                <span className="text-sm font-medium">{topCitiesCount}</span>
+                <span className="text-sm font-medium">{cityLimit}</span>
               </div>
               <input
-                id="top-cities-count"
+                id="city-limit"
                 type="range"
-                min="1"
-                max="20"
-                value={topCitiesCount}
-                onChange={(e) => setTopCitiesCount(Number.parseInt(e.target.value))}
+                min="10"
+                max="500"
+                step="10"
+                value={cityLimit}
+                onChange={(e) => setCityLimit(Number.parseInt(e.target.value))}
                 className="w-full"
               />
               <p className="text-xs text-gray-500 mt-1">
-                Selecciona cuántas ciudades con mayor población mexicana quieres ver de cada estado
+                Selecciona cuántas ciudades quieres mostrar en los resultados (de 10 a 500)
               </p>
             </div>
-            <Button onClick={fetchTopCitiesByState} disabled={isLoadingStates} className="w-full">
-              {isLoadingStates ? (
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-4">
+                <h4 className="font-medium">Población Mexicana</h4>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label htmlFor="min-population" className="text-xs">
+                      Mínimo
+                    </label>
+                    <Input
+                      id="min-population"
+                      type="number"
+                      min="0"
+                      value={filterCriteria.minPopulation}
+                      onChange={(e) =>
+                        setFilterCriteria({
+                          ...filterCriteria,
+                          minPopulation: Number.parseInt(e.target.value) || 0,
+                        })
+                      }
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="max-population" className="text-xs">
+                      Máximo
+                    </label>
+                    <Input
+                      id="max-population"
+                      type="number"
+                      min="0"
+                      value={filterCriteria.maxPopulation}
+                      onChange={(e) =>
+                        setFilterCriteria({
+                          ...filterCriteria,
+                          maxPopulation: Number.parseInt(e.target.value) || 0,
+                        })
+                      }
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <h4 className="font-medium">Porcentaje del Total</h4>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label htmlFor="min-percentage" className="text-xs">
+                      Mínimo (%)
+                    </label>
+                    <Input
+                      id="min-percentage"
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={filterCriteria.minPercentage}
+                      onChange={(e) =>
+                        setFilterCriteria({
+                          ...filterCriteria,
+                          minPercentage: Number.parseFloat(e.target.value) || 0,
+                        })
+                      }
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="max-percentage" className="text-xs">
+                      Máximo (%)
+                    </label>
+                    <Input
+                      id="max-percentage"
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={filterCriteria.maxPercentage}
+                      onChange={(e) =>
+                        setFilterCriteria({
+                          ...filterCriteria,
+                          maxPercentage: Number.parseFloat(e.target.value) || 100,
+                        })
+                      }
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <h4 className="font-medium">Ingreso Medio</h4>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label htmlFor="min-income" className="text-xs">
+                      Mínimo ($)
+                    </label>
+                    <Input
+                      id="min-income"
+                      type="number"
+                      min="0"
+                      value={filterCriteria.minIncome}
+                      onChange={(e) =>
+                        setFilterCriteria({
+                          ...filterCriteria,
+                          minIncome: Number.parseInt(e.target.value) || 0,
+                        })
+                      }
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="max-income" className="text-xs">
+                      Máximo ($)
+                    </label>
+                    <Input
+                      id="max-income"
+                      type="number"
+                      min="0"
+                      value={filterCriteria.maxIncome}
+                      onChange={(e) =>
+                        setFilterCriteria({
+                          ...filterCriteria,
+                          maxIncome: Number.parseInt(e.target.value) || 0,
+                        })
+                      }
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <h4 className="font-medium">Ordenar Por</h4>
+                <div className="grid grid-cols-2 gap-2">
+                  <Select
+                    value={filterCriteria.sortBy}
+                    onValueChange={(value: "population" | "percentage" | "income") =>
+                      setFilterCriteria({ ...filterCriteria, sortBy: value })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Criterio" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="population">Población Mexicana</SelectItem>
+                      <SelectItem value="percentage">Porcentaje</SelectItem>
+                      <SelectItem value="income">Ingreso Medio</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  <Select
+                    value={filterCriteria.sortOrder}
+                    onValueChange={(value: "asc" | "desc") =>
+                      setFilterCriteria({ ...filterCriteria, sortOrder: value })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Orden" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="desc">Mayor a Menor</SelectItem>
+                      <SelectItem value="asc">Menor a Mayor</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
+
+            <Button onClick={applyAdvancedFilters} disabled={isLoading || !advancedFilterState} className="w-full">
+              {isLoading ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  Cargando ({loadedStatesCount}/{totalStatesCount})
+                  Aplicando filtros...
                 </>
               ) : (
                 <>
                   <Search className="h-4 w-4 mr-2" />
-                  Buscar Top Ciudades
+                  Aplicar Filtros
                 </>
               )}
             </Button>
+
+            {filteredCities.length > 0 && (
+              <div className="mt-4">
+                <div className="flex justify-between items-center mb-2">
+                  <h3 className="font-medium text-lg">Mostrando {filteredCities.length} ciudades</h3>
+                  <Dialog open={exportDialogOpen} onOpenChange={setExportDialogOpen}>
+                    <DialogTrigger asChild>
+                      <Button variant="outline" size="sm" className="flex items-center gap-1">
+                        <Download className="h-4 w-4" />
+                        Exportar datos
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-md">
+                      <DialogHeader>
+                        <DialogTitle>Exportar datos de ciudades</DialogTitle>
+                        <DialogDescription>
+                          Selecciona las columnas que deseas incluir en el archivo CSV.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="grid gap-4 py-4">
+                        <div className="flex items-center space-x-2">
+                          <Checkbox
+                            id="export-name"
+                            checked={selectedColumns.name}
+                            onCheckedChange={(checked) =>
+                              setSelectedColumns({ ...selectedColumns, name: checked === true })
+                            }
+                          />
+                          <Label htmlFor="export-name">Ciudad</Label>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <Checkbox
+                            id="export-population"
+                            checked={selectedColumns.mexicanPopulation}
+                            onCheckedChange={(checked) =>
+                              setSelectedColumns({ ...selectedColumns, mexicanPopulation: checked === true })
+                            }
+                          />
+                          <Label htmlFor="export-population">Población Mexicana</Label>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <Checkbox
+                            id="export-percentage"
+                            checked={selectedColumns.percentage}
+                            onCheckedChange={(checked) =>
+                              setSelectedColumns({ ...selectedColumns, percentage: checked === true })
+                            }
+                          />
+                          <Label htmlFor="export-percentage">Porcentaje del Total</Label>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <Checkbox
+                            id="export-income"
+                            checked={selectedColumns.medianIncome}
+                            onCheckedChange={(checked) =>
+                              setSelectedColumns({ ...selectedColumns, medianIncome: checked === true })
+                            }
+                          />
+                          <Label htmlFor="export-income">Ingreso Medio</Label>
+                        </div>
+                      </div>
+                      <DialogFooter>
+                        <Button type="button" onClick={() => setExportDialogOpen(false)} variant="outline">
+                          Cancelar
+                        </Button>
+                        <Button type="button" onClick={exportCityData}>
+                          Exportar
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+                </div>
+
+                <div className="rounded-md border overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Ciudad</TableHead>
+                        <TableHead className="text-right">Población Mexicana</TableHead>
+                        <TableHead className="text-right">% del Total</TableHead>
+                        <TableHead className="text-right">Ingreso Medio</TableHead>
+                        <TableHead></TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredCities.map((city) => (
+                        <TableRow key={`${city.stateCode}-${city.placeId}`}>
+                          <TableCell className="font-medium">{city.name}</TableCell>
+                          <TableCell className="text-right">{city.mexicanPopulation.toLocaleString()}</TableCell>
+                          <TableCell className="text-right">{city.percentage}%</TableCell>
+                          <TableCell className="text-right">${city.medianIncome.toLocaleString()}</TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleCitySelect(city)}
+                              disabled={isLoading}
+                            >
+                              {isLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : "Ver detalles"}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            )}
           </div>
-        ) : searchType === "city" ? (
-          <div className="space-y-2">
-            <label htmlFor="cityname" className="text-sm font-medium">
-              Nombre de Ciudad
-            </label>
-            <div className="flex gap-2">
-              <Input
-                id="cityname"
-                placeholder="Ej: Miami"
-                value={cityName}
-                onChange={(e) => setCityName(e.target.value)}
-              />
-              <Button onClick={handleSearch} disabled={isLoading}>
-                {isLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Search className="h-4 w-4 mr-2" />}
-                Buscar
-              </Button>
-            </div>
-            <p className="text-xs text-gray-500 mt-1">Ingresa el nombre de una ciudad en Estados Unidos</p>
-          </div>
-        ) : searchType === "zipcode" ? (
-          <div className="space-y-2">
-            <label htmlFor="zipcode" className="text-sm font-medium">
-              Código Postal
-            </label>
-            <div className="flex gap-2">
-              <Input
-                id="zipcode"
-                placeholder="Ej: 90022"
-                value={zipCode}
-                onChange={(e) => setZipCode(e.target.value)}
-                maxLength={5}
-                pattern="\d{5}"
-              />
-              <Button onClick={handleSearch} disabled={isLoading}>
-                {isLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Search className="h-4 w-4 mr-2" />}
-                Buscar
-              </Button>
-            </div>
-            <p className="text-xs text-gray-500 mt-1">Ingresa un código postal de 5 dígitos (formato XXXXX)</p>
-          </div>
+        ) : searchType === "state" ? (
+          // Resto del código...
+          <></>
         ) : (
-          <div className="space-y-2">
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label htmlFor="statecode" className="text-sm font-medium">
-                  Código de Estado
-                </label>
-                <Input
-                  id="statecode"
-                  placeholder="Ej: 06 (CA)"
-                  value={stateCode}
-                  onChange={(e) => setStateCode(e.target.value)}
-                  maxLength={2}
-                  pattern="\d{2}"
-                />
-                <p className="text-xs text-gray-500 mt-1">2 dígitos (ej: 06 para CA)</p>
-              </div>
-              <div>
-                <label htmlFor="placeid" className="text-sm font-medium">
-                  ID de Lugar
-                </label>
-                <Input
-                  id="placeid"
-                  placeholder="Ej: 22230"
-                  value={placeId}
-                  onChange={(e) => setPlaceId(e.target.value)}
-                  pattern="\d+"
-                />
-                <p className="text-xs text-gray-500 mt-1">Solo dígitos numéricos</p>
-              </div>
-            </div>
-            <Button onClick={handleSearch} disabled={isLoading} className="w-full">
-              {isLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Search className="h-4 w-4 mr-2" />}
-              Buscar
-            </Button>
+          <></>
+        )}
+
+        <Button onClick={handleSearch} disabled={isLoading}>
+          {isLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+          Buscar
+        </Button>
+
+        {searchResults && (
+          <div className="mt-6">
+            <h3 className="font-medium text-lg mb-2">Resultados de la Búsqueda</h3>
+            {renderCityDetails(searchResults)}
           </div>
         )}
 
-        {error && (
-          <Alert variant="destructive">
-            <AlertCircle className="h-4 w-4" />
-            <AlertTitle>Error</AlertTitle>
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
-
-        {searchResults && renderResults()}
-        {stateCitiesResults.length > 0 && renderStateCitiesTable()}
-        {topCitiesResults.length > 0 && renderTopCitiesTable()}
-        {stateComparisonData.length > 0 && renderStateComparisonTable()}
+        {searchType === "state" && renderStateCitiesTable()}
+        {searchType === "topCities" && renderTopCitiesTable()}
+        {searchType === "compareStates" && renderStateComparisonTable()}
       </CardContent>
-      <CardFooter className="flex flex-col items-start text-xs text-gray-500">
-        <p className="mb-1">
-          <strong>Estados con mayor población mexicana:</strong> California (06), Texas (48), Arizona (04), Illinois
-          (17)
-        </p>
-        <p className="mb-1">
-          <strong>Ejemplos de ciudades:</strong> Miami (FL), Los Angeles (CA), Chicago (IL), Houston (TX)
-        </p>
-        <p className="mb-1">
-          <strong>Ejemplos de códigos postales válidos:</strong> 90022 (East Los Angeles, CA), 78501 (McAllen, TX),
-          10001 (New York, NY)
-        </p>
-      </CardFooter>
     </Card>
   )
 }
