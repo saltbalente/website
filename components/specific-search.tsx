@@ -1,10 +1,12 @@
 "use client"
 
-import { useState } from "react"
+import type React from "react"
+
+import { useState, useEffect } from "react"
 import { Loader2, Download, Search } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
@@ -19,7 +21,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
-import { fetchLocationSpecificData, fetchNeighborhoodsByCity } from "@/lib/census-api"
+import { fetchLocationSpecificData } from "@/lib/census-api"
 
 // Lista de estados de EE.UU. con sus códigos
 const US_STATES = [
@@ -149,6 +151,26 @@ export function SpecificSearch() {
   })
 
   const [cityLimit, setCityLimit] = useState(50)
+
+  // Añadir después de las declaraciones de estado existentes
+  const [savedSortConfigs, setSavedSortConfigs] = useState<
+    Array<{
+      id: string
+      name: string
+      criteria: Array<{ column: string; direction: "asc" | "desc" }>
+      searchType: string
+    }>
+  >([])
+  const [saveConfigDialogOpen, setSaveConfigDialogOpen] = useState(false)
+  const [newConfigName, setNewConfigName] = useState("")
+  const [loadConfigDialogOpen, setLoadConfigDialogOpen] = useState(false)
+
+  // Reemplazar estas líneas:
+  // const [sortColumn, setSortColumn] = useState<string | null>(null)
+  // const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc")
+
+  // Por esta estructura:
+  const [sortCriteria, setSortCriteria] = useState<Array<{ column: string; direction: "asc" | "desc" }>>([])
 
   // Validar código postal
   const validateZipCode = (zip: string): boolean => {
@@ -997,628 +1019,99 @@ export function SpecificSearch() {
     setExportDialogOpen(false)
   }
 
-  // Función para renderizar la tabla de ciudades por estado
-  const renderStateCitiesTable = () => {
-    if (stateCitiesResults.length === 0) return null
+  // Modifiquemos la función handleSort para manejar múltiples columnas:
+  const handleSort = (column: string, isMultiSort = false) => {
+    // Crear una copia del array de criterios actual
+    let newSortCriteria = [...sortCriteria]
 
-    const stateName = US_STATES.find((state) => state.code === selectedState)?.name || "Seleccionado"
+    // Buscar si la columna ya está en los criterios
+    const existingCriterionIndex = newSortCriteria.findIndex((c) => c.column === column)
 
-    return (
-      <div className="mt-4">
-        <div className="flex justify-between items-center mb-2">
-          <h3 className="font-medium text-lg">
-            Ciudades con población mexicana en {stateName} ({stateCitiesResults.length})
-          </h3>
-          <Dialog open={exportDialogOpen} onOpenChange={setExportDialogOpen}>
-            <DialogTrigger asChild>
-              <Button variant="outline" size="sm" className="flex items-center gap-1">
-                <Download className="h-4 w-4" />
-                Exportar datos
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-md">
-              <DialogHeader>
-                <DialogTitle>Exportar datos de ciudades</DialogTitle>
-                <DialogDescription>Selecciona las columnas que deseas incluir en el archivo CSV.</DialogDescription>
-              </DialogHeader>
-              <div className="grid gap-4 py-4">
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="export-name"
-                    checked={selectedColumns.name}
-                    onCheckedChange={(checked) => setSelectedColumns({ ...selectedColumns, name: checked === true })}
-                  />
-                  <Label htmlFor="export-name">Ciudad</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="export-population"
-                    checked={selectedColumns.mexicanPopulation}
-                    onCheckedChange={(checked) =>
-                      setSelectedColumns({ ...selectedColumns, mexicanPopulation: checked === true })
-                    }
-                  />
-                  <Label htmlFor="export-population">Población Mexicana</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="export-percentage"
-                    checked={selectedColumns.percentage}
-                    onCheckedChange={(checked) =>
-                      setSelectedColumns({ ...selectedColumns, percentage: checked === true })
-                    }
-                  />
-                  <Label htmlFor="export-percentage">Porcentaje del Total</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="export-income"
-                    checked={selectedColumns.medianIncome}
-                    onCheckedChange={(checked) =>
-                      setSelectedColumns({ ...selectedColumns, medianIncome: checked === true })
-                    }
-                  />
-                  <Label htmlFor="export-income">Ingreso Medio</Label>
-                </div>
-              </div>
-              <DialogFooter>
-                <Button type="button" onClick={() => setExportDialogOpen(false)} variant="outline">
-                  Cancelar
-                </Button>
-                <Button type="button" onClick={exportCityData}>
-                  Exportar
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-        </div>
-
-        <div className="rounded-md border overflow-hidden">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Ciudad</TableHead>
-                <TableHead className="text-right">Población Mexicana</TableHead>
-                <TableHead className="text-right">% del Total</TableHead>
-                <TableHead className="text-right">Ingreso Medio</TableHead>
-                <TableHead></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {stateCitiesResults.map((city) => (
-                <TableRow key={`${city.stateCode}-${city.placeId}`}>
-                  <TableCell className="font-medium">{city.name}</TableCell>
-                  <TableCell className="text-right">{city.mexicanPopulation.toLocaleString()}</TableCell>
-                  <TableCell className="text-right">{city.percentage}%</TableCell>
-                  <TableCell className="text-right">${city.medianIncome.toLocaleString()}</TableCell>
-                  <TableCell className="text-right">
-                    <Button variant="outline" size="sm" onClick={() => handleCitySelect(city)} disabled={isLoading}>
-                      {isLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : "Ver detalles"}
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-
-        {selectedCityData && (
-          <div className="mt-6">
-            <h3 className="font-medium text-lg mb-2">Detalles de {selectedCityData["Nombre de la Ubicación"]}</h3>
-            {renderCityDetails(selectedCityData)}
-          </div>
-        )}
-      </div>
-    )
-  }
-
-  // Función para renderizar la tabla de top ciudades por estado
-  const renderTopCitiesTable = () => {
-    if (topCitiesResults.length === 0) return null
-
-    return (
-      <div className="mt-4">
-        <div className="flex justify-between items-center mb-2">
-          <h3 className="font-medium text-lg">
-            Top {topCitiesCount} ciudades con mayor población mexicana por estado ({topCitiesResults.length} ciudades)
-          </h3>
-          <Dialog open={exportDialogOpen} onOpenChange={setExportDialogOpen}>
-            <DialogTrigger asChild>
-              <Button variant="outline" size="sm" className="flex items-center gap-1">
-                <Download className="h-4 w-4" />
-                Exportar datos
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-md">
-              <DialogHeader>
-                <DialogTitle>Exportar datos de ciudades</DialogTitle>
-                <DialogDescription>Selecciona las columnas que deseas incluir en el archivo CSV.</DialogDescription>
-              </DialogHeader>
-              <div className="grid gap-4 py-4">
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="export-name"
-                    checked={selectedColumns.name}
-                    onCheckedChange={(checked) => setSelectedColumns({ ...selectedColumns, name: checked === true })}
-                  />
-                  <Label htmlFor="export-name">Ciudad</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="export-state"
-                    checked={selectedColumns.stateName}
-                    onCheckedChange={(checked) =>
-                      setSelectedColumns({ ...selectedColumns, stateName: checked === true })
-                    }
-                  />
-                  <Label htmlFor="export-state">Estado</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="export-population"
-                    checked={selectedColumns.mexicanPopulation}
-                    onCheckedChange={(checked) =>
-                      setSelectedColumns({ ...selectedColumns, mexicanPopulation: checked === true })
-                    }
-                  />
-                  <Label htmlFor="export-population">Población Mexicana</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="export-percentage"
-                    checked={selectedColumns.percentage}
-                    onCheckedChange={(checked) =>
-                      setSelectedColumns({ ...selectedColumns, percentage: checked === true })
-                    }
-                  />
-                  <Label htmlFor="export-percentage">Porcentaje del Total</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="export-income"
-                    checked={selectedColumns.medianIncome}
-                    onCheckedChange={(checked) =>
-                      setSelectedColumns({ ...selectedColumns, medianIncome: checked === true })
-                    }
-                  />
-                  <Label htmlFor="export-income">Ingreso Medio</Label>
-                </div>
-              </div>
-              <DialogFooter>
-                <Button type="button" onClick={() => setExportDialogOpen(false)} variant="outline">
-                  Cancelar
-                </Button>
-                <Button type="button" onClick={exportTopCitiesData}>
-                  Exportar
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-        </div>
-
-        <div className="rounded-md border overflow-hidden">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Ciudad</TableHead>
-                <TableHead>Estado</TableHead>
-                <TableHead className="text-right">Población Mexicana</TableHead>
-                <TableHead className="text-right">% del Total</TableHead>
-                <TableHead className="text-right">Ingreso Medio</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {topCitiesResults.map((city) => (
-                <TableRow key={`${city.stateCode}-${city.placeId}`}>
-                  <TableCell className="font-medium">{city.name}</TableCell>
-                  <TableCell>{city.stateName}</TableCell>
-                  <TableCell className="text-right">{city.mexicanPopulation.toLocaleString()}</TableCell>
-                  <TableCell className="text-right">{city.percentage}%</TableCell>
-                  <TableCell className="text-right">${city.medianIncome.toLocaleString()}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      </div>
-    )
-  }
-
-  // Función para renderizar la tabla de comparación de estados
-  const renderStateComparisonTable = () => {
-    if (stateComparisonData.length === 0) return null
-
-    return (
-      <div className="mt-4">
-        <div className="flex justify-between items-center mb-2">
-          <h3 className="font-medium text-lg">Comparación de estados ({stateComparisonData.length} estados)</h3>
-          <div className="flex items-center gap-2">
-            <Select value={comparisonMetric} onValueChange={(value: any) => setComparisonMetric(value)}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Ordenar por" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="population">Población Mexicana</SelectItem>
-                <SelectItem value="percentage">Porcentaje</SelectItem>
-                <SelectItem value="cities">Número de Ciudades</SelectItem>
-              </SelectContent>
-            </Select>
-            <Button variant="outline" size="sm" className="flex items-center gap-1" onClick={exportStateComparisonData}>
-              <Download className="h-4 w-4" />
-              Exportar
-            </Button>
-          </div>
-        </div>
-
-        <div className="rounded-md border overflow-hidden">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Estado</TableHead>
-                <TableHead className="text-right">Población Mexicana</TableHead>
-                <TableHead className="text-right">% del Total</TableHead>
-                <TableHead className="text-right">Ingreso Medio</TableHead>
-                <TableHead className="text-right">Ciudades</TableHead>
-                <TableHead className="text-right">% Promedio en Ciudades</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {stateComparisonData.map((state) => (
-                <TableRow key={state.stateCode} className={state.error ? "bg-red-50" : ""}>
-                  <TableCell className="font-medium">{state.stateName}</TableCell>
-                  <TableCell className="text-right">{state.mexicanPopulation.toLocaleString()}</TableCell>
-                  <TableCell className="text-right">{state.percentage}%</TableCell>
-                  <TableCell className="text-right">${state.medianIncome.toLocaleString()}</TableCell>
-                  <TableCell className="text-right">{state.citiesCount}</TableCell>
-                  <TableCell className="text-right">{state.averageCityPercentage}%</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-
-        {stateComparisonData.length > 0 && (
-          <div className="mt-6">
-            <h3 className="font-medium text-lg mb-2">Top 5 ciudades por estado</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {stateComparisonData.map((state) => (
-                <Card key={state.stateCode} className="overflow-hidden">
-                  <CardHeader className="p-4 pb-2">
-                    <CardTitle className="text-lg">{state.stateName}</CardTitle>
-                    <CardDescription>
-                      Población mexicana: {state.mexicanPopulation.toLocaleString()} ({state.percentage}%)
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="p-4 pt-0">
-                    {state.topCities.length > 0 ? (
-                      <div className="text-sm">
-                        <div className="font-medium mb-1">Principales ciudades:</div>
-                        <ul className="space-y-1">
-                          {state.topCities.map((city: any, index: number) => (
-                            <li key={index} className="flex justify-between">
-                              <span>{city.name}</span>
-                              <span className="text-gray-500">
-                                {city.mexicanPopulation.toLocaleString()} ({city.percentage}%)
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    ) : (
-                      <div className="text-sm text-gray-500">No hay datos de ciudades disponibles</div>
-                    )}
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-    )
-  }
-
-  // Función para renderizar los detalles de una ciudad seleccionada
-  const renderCityDetails = (cityData: any) => {
-    // Filtrar los datos originales si están presentes
-    const displayData = { ...cityData }
-    const rawData = displayData._datosOriginales
-    delete displayData._datosOriginales
-
-    // Agrupar los datos en categorías
-    const generalInfo = {}
-    const demographicInfo = {}
-    const economicInfo = {}
-    const educationInfo = {}
-
-    Object.entries(displayData).forEach(([key, value]) => {
-      if (
-        key.includes("Código") ||
-        key.includes("Año") ||
-        key.includes("Nombre") ||
-        key.includes("Estado") ||
-        key.includes("ID")
-      ) {
-        generalInfo[key] = value
-      } else if (key.includes("Población") || key.includes("Porcentaje Mexicano")) {
-        demographicInfo[key] = value
-      } else if (key.includes("Ingreso")) {
-        economicInfo[key] = value
-      } else if (key.includes("Educación") || key.includes("Licenciatura") || key.includes("Posgrado")) {
-        educationInfo[key] = value
+    if (existingCriterionIndex >= 0) {
+      // Si la columna ya está en los criterios, invertir su dirección
+      const existingCriterion = newSortCriteria[existingCriterionIndex]
+      const updatedCriterion = {
+        ...existingCriterion,
+        direction: existingCriterion.direction === "asc" ? "desc" : "asc",
       }
+
+      // Si no es multi-ordenamiento, eliminar todos los demás criterios
+      if (!isMultiSort) {
+        newSortCriteria = [updatedCriterion]
+      } else {
+        // Actualizar el criterio existente manteniendo su posición
+        newSortCriteria[existingCriterionIndex] = updatedCriterion
+      }
+    } else {
+      // Si la columna no está en los criterios, añadirla
+      const newCriterion = { column, direction: "desc" }
+
+      if (!isMultiSort) {
+        // Si no es multi-ordenamiento, reemplazar todos los criterios
+        newSortCriteria = [newCriterion]
+      } else {
+        // Añadir como criterio adicional
+        newSortCriteria.push(newCriterion)
+      }
+    }
+
+    // Actualizar el estado
+    setSortCriteria(newSortCriteria)
+
+    // Aplicar el ordenamiento a los datos
+    let sortedData: any[] = []
+
+    if (searchType === "state") {
+      sortedData = [...stateCitiesResults]
+      applyMultiSort(sortedData, newSortCriteria)
+      setStateCitiesResults(sortedData)
+    } else if (searchType === "topCities") {
+      sortedData = [...topCitiesResults]
+      applyMultiSort(sortedData, newSortCriteria)
+      setTopCitiesResults(sortedData)
+    } else if (searchType === "advancedFilter") {
+      sortedData = [...filteredCities]
+      applyMultiSort(sortedData, newSortCriteria)
+      setFilteredCities(sortedData)
+    }
+  }
+
+  // Añadamos la función auxiliar para aplicar múltiples criterios de ordenamiento:
+  const applyMultiSort = (data: any[], criteria: Array<{ column: string; direction: "asc" | "desc" }>) => {
+    data.sort((a, b) => {
+      // Iterar a través de los criterios en orden
+      for (const criterion of criteria) {
+        let comparison = 0
+
+        // Aplicar la comparación según la columna
+        if (criterion.column === "name") {
+          comparison = a.name.localeCompare(b.name)
+        } else if (criterion.column === "state" && a.stateName && b.stateName) {
+          comparison = a.stateName.localeCompare(b.stateName)
+        } else if (criterion.column === "population") {
+          comparison = a.mexicanPopulation - b.mexicanPopulation
+        } else if (criterion.column === "percentage") {
+          comparison = a.percentage - b.percentage
+        } else if (criterion.column === "income") {
+          comparison = a.medianIncome - b.medianIncome
+        }
+
+        // Invertir la comparación si la dirección es descendente
+        if (criterion.direction === "desc") {
+          comparison = -comparison
+        }
+
+        // Si hay una diferencia, devolver el resultado
+        if (comparison !== 0) {
+          return comparison
+        }
+
+        // Si no hay diferencia, continuar con el siguiente criterio
+      }
+
+      // Si todos los criterios son iguales, mantener el orden original
+      return 0
     })
-
-    return (
-      <Tabs defaultValue="general" className="w-full">
-        <TabsList className="grid grid-cols-5 mb-4">
-          <TabsTrigger value="general">General</TabsTrigger>
-          <TabsTrigger value="demographic">Demografía</TabsTrigger>
-          <TabsTrigger value="economic">Económico</TabsTrigger>
-          <TabsTrigger value="education">Educación</TabsTrigger>
-          <TabsTrigger value="neighborhoods">Barrios</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="general" className="bg-gray-50 rounded-md p-4">
-          <h4 className="font-medium mb-2">Información General</h4>
-          <div className="space-y-2">
-            {Object.entries(generalInfo).map(([key, value]) => (
-              <div key={key} className="grid grid-cols-2 gap-2 text-sm">
-                <div className="font-medium">{key}:</div>
-                <div>{String(value)}</div>
-              </div>
-            ))}
-          </div>
-        </TabsContent>
-
-        <TabsContent value="demographic" className="bg-gray-50 rounded-md p-4">
-          <h4 className="font-medium mb-2">Información Demográfica</h4>
-          <div className="space-y-2">
-            {Object.entries(demographicInfo).map(([key, value]) => (
-              <div key={key} className="grid grid-cols-2 gap-2 text-sm">
-                <div className="font-medium">{key}:</div>
-                <div>{String(value)}</div>
-              </div>
-            ))}
-          </div>
-        </TabsContent>
-
-        <TabsContent value="economic" className="bg-gray-50 rounded-md p-4">
-          <h4 className="font-medium mb-2">Información Económica</h4>
-          <div className="space-y-2">
-            {Object.entries(economicInfo).map(([key, value]) => (
-              <div key={key} className="grid grid-cols-2 gap-2 text-sm">
-                <div className="font-medium">{key}:</div>
-                <div>{String(value)}</div>
-              </div>
-            ))}
-          </div>
-        </TabsContent>
-
-        <TabsContent value="education" className="bg-gray-50 rounded-md p-4">
-          <h4 className="font-medium mb-2">Información Educativa</h4>
-          <div className="space-y-2">
-            {Object.entries(educationInfo).map(([key, value]) => (
-              <div key={key} className="grid grid-cols-2 gap-2 text-sm">
-                <div className="font-medium">{key}:</div>
-                <div>{String(value)}</div>
-              </div>
-            ))}
-          </div>
-        </TabsContent>
-
-        <TabsContent value="neighborhoods" className="bg-gray-50 rounded-md p-4">
-          <h4 className="font-medium mb-2">Barrios con Población Mexicana</h4>
-          <div className="space-y-4">
-            <p className="text-sm text-gray-500">
-              Estos son los barrios con mayor concentración de población mexicana en esta ciudad.
-            </p>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                if (cityData && cityData["Código de Estado"] && cityData["ID de Lugar"]) {
-                  setIsLoading(true)
-                  // Función para determinar si dos nombres son similares
-                  const areSimilarNames = (name1: string, name2: string): boolean => {
-                    // Si los nombres son idénticos, son similares
-                    if (name1 === name2) return true
-
-                    // Si un nombre está contenido en el otro, son similares
-                    if (name1.includes(name2) || name2.includes(name1)) return true
-
-                    // Calcular la distancia de Levenshtein (número de ediciones necesarias para transformar un string en otro)
-                    const levenshteinDistance = (a: string, b: string): number => {
-                      const matrix = Array(b.length + 1)
-                        .fill(null)
-                        .map(() => Array(a.length + 1).fill(null))
-
-                      for (let i = 0; i <= a.length; i++) {
-                        matrix[0][i] = i
-                      }
-
-                      for (let j = 0; j <= b.length; j++) {
-                        matrix[j][0] = j
-                      }
-
-                      for (let j = 1; j <= b.length; j++) {
-                        for (let i = 1; i <= a.length; i++) {
-                          const substitutionCost = a[i - 1] === b[j - 1] ? 0 : 1
-                          matrix[j][i] = Math.min(
-                            matrix[j][i - 1] + 1, // eliminación
-                            matrix[j - 1][i] + 1, // inserción
-                            matrix[j - 1][i - 1] + substitutionCost, // sustitución
-                          )
-                        }
-                      }
-
-                      return matrix[b.length][a.length]
-                    }
-
-                    // Calcular la similitud basada en la distancia de Levenshtein
-                    const maxLength = Math.max(name1.length, name2.length)
-                    const distance = levenshteinDistance(name1, name2)
-                    const similarity = 1 - distance / maxLength
-
-                    // Si la similitud es mayor que un umbral (por ejemplo, 0.7 o 70%), considerar los nombres como similares
-                    return similarity > 0.7
-                  }
-
-                  fetchNeighborhoodsByCity(cityData["Código de Estado"], cityData["ID de Lugar"])
-                    .then((fetchedNeighborhoods) => {
-                      // Agrupar barrios con nombres similares
-                      const groupedNeighborhoods = new Map()
-
-                      // Primera pasada: normalizar nombres y crear grupos iniciales
-                      fetchedNeighborhoods.forEach((neighborhood) => {
-                        const normalizedName = normalizeNeighborhoodName(neighborhood.name)
-
-                        if (groupedNeighborhoods.has(normalizedName)) {
-                          // Si ya existe un grupo con este nombre, sumar los datos
-                          const existingGroup = groupedNeighborhoods.get(normalizedName)
-                          existingGroup.totalPopulation += neighborhood.totalPopulation
-                          existingGroup.mexicanPopulation += neighborhood.mexicanPopulation
-
-                          // Añadir el código postal si no está ya incluido
-                          if (!existingGroup.zipCode.includes(neighborhood.zipCode)) {
-                            existingGroup.zipCode = existingGroup.zipCode + ", " + neighborhood.zipCode
-                          }
-
-                          // Guardar los nombres originales para referencia
-                          if (!existingGroup.originalNames) {
-                            existingGroup.originalNames = [existingGroup.originalName]
-                          }
-                          existingGroup.originalNames.push(neighborhood.name)
-
-                          // Recalcular el porcentaje
-                          existingGroup.percentage =
-                            existingGroup.totalPopulation > 0
-                              ? Number.parseFloat(
-                                  ((existingGroup.mexicanPopulation / existingGroup.totalPopulation) * 100).toFixed(1),
-                                )
-                              : 0
-                        } else {
-                          // Si no existe, crear un nuevo grupo
-                          groupedNeighborhoods.set(normalizedName, {
-                            ...neighborhood,
-                            name: normalizedName, // Usar el nombre normalizado
-                            originalName: neighborhood.name, // Guardar el nombre original
-                          })
-                        }
-                      })
-
-                      // Segunda pasada: buscar similitudes entre nombres normalizados
-                      // Esto ayuda a unificar barrios que podrían tener variaciones menores
-                      const normalizedNames = Array.from(groupedNeighborhoods.keys())
-
-                      for (let i = 0; i < normalizedNames.length; i++) {
-                        const name1 = normalizedNames[i]
-
-                        // Si este nombre ya fue fusionado con otro, continuar
-                        if (!groupedNeighborhoods.has(name1)) continue
-
-                        for (let j = i + 1; j < normalizedNames.length; j++) {
-                          const name2 = normalizedNames[j]
-
-                          // Si este nombre ya fue fusionado con otro, continuar
-                          if (!groupedNeighborhoods.has(name2)) continue
-
-                          // Verificar si los nombres son muy similares (por ejemplo, "Downtown" y "Down Town")
-                          if (areSimilarNames(name1, name2)) {
-                            const group1 = groupedNeighborhoods.get(name1)
-                            const group2 = groupedNeighborhoods.get(name2)
-
-                            // Fusionar el grupo 2 en el grupo 1
-                            group1.totalPopulation += group2.totalPopulation
-                            group1.mexicanPopulation += group2.mexicanPopulation
-
-                            // Combinar códigos postales
-                            if (!group1.zipCode.includes(group2.zipCode)) {
-                              group1.zipCode = group1.zipCode + ", " + group2.zipCode
-                            }
-
-                            // Combinar nombres originales
-                            if (!group1.originalNames) {
-                              group1.originalNames = [group1.originalName]
-                            }
-                            if (!group2.originalNames) {
-                              group2.originalNames = []
-                            }
-                            group1.originalNames = group1.originalNames.concat(group2.originalNames)
-
-                            // Recalcular el porcentaje
-                            group1.percentage =
-                              group1.totalPopulation > 0
-                                ? Number.parseFloat(
-                                    ((group1.mexicanPopulation / group1.totalPopulation) * 100).toFixed(1),
-                                  )
-                                : 0
-
-                            // Eliminar el grupo 2
-                            groupedNeighborhoods.delete(name2)
-                          }
-                        }
-                      }
-
-                      // Convertir el mapa a un array
-                      const finalNeighborhoods = Array.from(groupedNeighborhoods.values())
-
-                      // Ordenar por población mexicana (de mayor a menor)
-                      finalNeighborhoods.sort((a, b) => b.mexicanPopulation - a.mexicanPopulation)
-
-                      setNeighborhoods(finalNeighborhoods)
-                    })
-                    .catch((error) => {
-                      console.error("Error obteniendo barrios:", error)
-                      setError(error instanceof Error ? error.message : "Error desconocido al obtener barrios")
-                    })
-                    .finally(() => {
-                      setIsLoading(false)
-                    })
-                }
-              }}
-              disabled={isLoading}
-            >
-              {isLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : "Buscar Barrios"}
-            </Button>
-            {neighborhoods.length > 0 ? (
-              <div className="rounded-md border overflow-hidden">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Barrio</TableHead>
-                      <TableHead className="text-right">Población Mexicana</TableHead>
-                      <TableHead className="text-right">% del Total</TableHead>
-                      <TableHead className="text-right">Códigos Postales</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {neighborhoods.map((neighborhood, index) => (
-                      <TableRow key={index}>
-                        <TableCell className="font-medium">{neighborhood.name}</TableCell>
-                        <TableCell className="text-right">{neighborhood.mexicanPopulation.toLocaleString()}</TableCell>
-                        <TableCell className="text-right">{neighborhood.percentage}%</TableCell>
-                        <TableCell className="text-right">{neighborhood.zipCode}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            ) : (
-              <p className="text-sm text-gray-500">
-                {isLoading ? "Buscando barrios..." : "No se encontraron barrios con población mexicana en esta ciudad."}
-              </p>
-            )}
-          </div>
-        </TabsContent>
-
-        {showRawData && rawData && (
-          <TabsContent value="raw" className="bg-gray-50 rounded-md p-4">
-            <h4 className="font-medium mb-2">Datos Originales</h4>
-            <pre className="text-sm">{JSON.stringify(rawData, null, 2)}</pre>
-          </TabsContent>
-        )}
-      </Tabs>
-    )
   }
 
   const handleCitySelect = async (city: any) => {
@@ -1753,6 +1246,211 @@ export function SpecificSearch() {
     } finally {
       setIsLoading(false)
     }
+  }
+
+  // Añadir después de la función applyAdvancedFilters
+
+  // Cargar configuraciones guardadas al iniciar
+  useEffect(() => {
+    const savedConfigs = localStorage.getItem("sortConfigurations")
+    if (savedConfigs) {
+      try {
+        setSavedSortConfigs(JSON.parse(savedConfigs))
+      } catch (e) {
+        console.error("Error al cargar configuraciones guardadas:", e)
+      }
+    }
+  }, [])
+
+  // Guardar configuración actual
+  const saveCurrentSortConfig = () => {
+    if (!newConfigName.trim()) {
+      setError("Por favor, ingresa un nombre para la configuración")
+      return
+    }
+
+    // Crear un ID único basado en timestamp
+    const configId = `config_${Date.now()}`
+
+    // Crear la nueva configuración
+    const newConfig = {
+      id: configId,
+      name: newConfigName.trim(),
+      criteria: sortCriteria,
+      searchType: searchType,
+    }
+
+    // Actualizar el estado con la nueva configuración
+    const updatedConfigs = [...savedSortConfigs, newConfig]
+    setSavedSortConfigs(updatedConfigs)
+
+    // Guardar en localStorage
+    localStorage.setItem("sortConfigurations", JSON.stringify(updatedConfigs))
+
+    // Limpiar y cerrar el diálogo
+    setNewConfigName("")
+    setSaveConfigDialogOpen(false)
+  }
+
+  // Cargar una configuración guardada
+  const loadSortConfig = (configId: string) => {
+    const config = savedSortConfigs.find((c) => c.id === configId)
+    if (config) {
+      // Aplicar los criterios de ordenamiento
+      setSortCriteria(config.criteria)
+
+      // Si el tipo de búsqueda es diferente, mostrar una advertencia
+      if (config.searchType !== searchType) {
+        setError(
+          `Nota: Esta configuración fue creada para la búsqueda de tipo "${config.searchType}". Algunos criterios podrían no aplicarse correctamente.`,
+        )
+      }
+
+      // Aplicar el ordenamiento a los datos actuales
+      let dataToSort: any[] = []
+
+      if (searchType === "state") {
+        dataToSort = [...stateCitiesResults]
+        applyMultiSort(dataToSort, config.criteria)
+        setStateCitiesResults(dataToSort)
+      } else if (searchType === "topCities") {
+        dataToSort = [...topCitiesResults]
+        applyMultiSort(dataToSort, config.criteria)
+        setTopCitiesResults(dataToSort)
+      } else if (searchType === "advancedFilter") {
+        dataToSort = [...filteredCities]
+        applyMultiSort(dataToSort, config.criteria)
+        setFilteredCities(dataToSort)
+      }
+    }
+
+    // Cerrar el diálogo
+    setLoadConfigDialogOpen(false)
+  }
+
+  // Eliminar una configuración guardada
+  const deleteSortConfig = (configId: string, e: React.MouseEvent) => {
+    // Evitar que el clic se propague al elemento padre
+    e.stopPropagation()
+
+    // Filtrar la configuración a eliminar
+    const updatedConfigs = savedSortConfigs.filter((c) => c.id !== configId)
+    setSavedSortConfigs(updatedConfigs)
+
+    // Actualizar localStorage
+    localStorage.setItem("sortConfigurations", JSON.stringify(updatedConfigs))
+  }
+
+  // Declare the missing functions
+  const renderCityDetails = (data: any) => {
+    if (!data) return null
+
+    return (
+      <div>
+        <p>Nombre: {data.name}</p>
+        <p>Población Total: {data.totalPopulation}</p>
+        <p>Población Mexicana: {data.mexicanPopulation}</p>
+        <p>Porcentaje: {data.percentage}</p>
+        <p>Ingreso Medio: {data.medianIncome}</p>
+      </div>
+    )
+  }
+
+  const renderStateCitiesTable = () => {
+    return (
+      <div>
+        {stateCitiesResults.length > 0 ? (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Ciudad</TableHead>
+                <TableHead>Población Mexicana</TableHead>
+                <TableHead>Porcentaje</TableHead>
+                <TableHead>Ingreso Medio</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {stateCitiesResults.map((city) => (
+                <TableRow key={city.placeId}>
+                  <TableCell>{city.name}</TableCell>
+                  <TableCell>{city.mexicanPopulation}</TableCell>
+                  <TableCell>{city.percentage}</TableCell>
+                  <TableCell>{city.medianIncome}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        ) : (
+          <p>No se encontraron ciudades.</p>
+        )}
+      </div>
+    )
+  }
+
+  const renderTopCitiesTable = () => {
+    return (
+      <div>
+        {topCitiesResults.length > 0 ? (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Ciudad</TableHead>
+                <TableHead>Estado</TableHead>
+                <TableHead>Población Mexicana</TableHead>
+                <TableHead>Porcentaje</TableHead>
+                <TableHead>Ingreso Medio</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {topCitiesResults.map((city) => (
+                <TableRow key={`${city.stateCode}-${city.placeId}`}>
+                  <TableCell>{city.name}</TableCell>
+                  <TableCell>{city.stateName}</TableCell>
+                  <TableCell>{city.mexicanPopulation}</TableCell>
+                  <TableCell>{city.percentage}</TableCell>
+                  <TableCell>{city.medianIncome}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        ) : (
+          <p>No se encontraron ciudades.</p>
+        )}
+      </div>
+    )
+  }
+
+  const renderStateComparisonTable = () => {
+    return (
+      <div>
+        {stateComparisonData.length > 0 ? (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Estado</TableHead>
+                <TableHead>Población Mexicana</TableHead>
+                <TableHead>Porcentaje</TableHead>
+                <TableHead>Ingreso Medio</TableHead>
+                <TableHead>Número de Ciudades</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {stateComparisonData.map((state) => (
+                <TableRow key={state.stateCode}>
+                  <TableCell>{state.stateName}</TableCell>
+                  <TableCell>{state.mexicanPopulation}</TableCell>
+                  <TableCell>{state.percentage}</TableCell>
+                  <TableCell>{state.medianIncome}</TableCell>
+                  <TableCell>{state.citiesCount}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        ) : (
+          <p>No se encontraron datos de comparación.</p>
+        )}
+      </div>
+    )
   }
 
   return (
@@ -2179,15 +1877,236 @@ export function SpecificSearch() {
                     </DialogContent>
                   </Dialog>
                 </div>
-
+                // Añadir este elemento informativo antes de la tabla
+                <div className="text-xs text-gray-500 mb-2">
+                  Haz clic en un encabezado para ordenar. Mantén presionada la tecla Shift mientras haces clic para
+                  ordenar por múltiples columnas.
+                </div>
+                <div className="flex items-center gap-2 mb-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setSaveConfigDialogOpen(true)}
+                    disabled={sortCriteria.length === 0}
+                    className="flex items-center gap-1"
+                  >
+                    Guardar ordenamiento
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setLoadConfigDialogOpen(true)}
+                    disabled={savedSortConfigs.length === 0}
+                    className="flex items-center gap-1"
+                  >
+                    Cargar ordenamiento
+                  </Button>
+                </div>
+                {/* Diálogo para guardar configuración */}
+                <Dialog open={saveConfigDialogOpen} onOpenChange={setSaveConfigDialogOpen}>
+                  <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                      <DialogTitle>Guardar configuración de ordenamiento</DialogTitle>
+                      <DialogDescription>
+                        Guarda la configuración actual de ordenamiento para usarla en el futuro.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="grid gap-4 py-4">
+                      <div className="grid grid-cols-4 items-center gap-4">
+                        <Label htmlFor="config-name" className="text-right">
+                          Nombre
+                        </Label>
+                        <Input
+                          id="config-name"
+                          value={newConfigName}
+                          onChange={(e) => setNewConfigName(e.target.value)}
+                          placeholder="Mi ordenamiento personalizado"
+                          className="col-span-3"
+                        />
+                      </div>
+                      {sortCriteria.length > 0 ? (
+                        <div className="bg-gray-50 p-3 rounded-md">
+                          <p className="text-sm font-medium mb-2">Criterios actuales:</p>
+                          <ul className="text-sm space-y-1">
+                            {sortCriteria.map((criterion, index) => (
+                              <li key={index}>
+                                {index + 1}.{" "}
+                                {criterion.column === "name"
+                                  ? "Ciudad"
+                                  : criterion.column === "state"
+                                    ? "Estado"
+                                    : criterion.column === "population"
+                                      ? "Población Mexicana"
+                                      : criterion.column === "percentage"
+                                        ? "% del Total"
+                                        : criterion.column === "income"
+                                          ? "Ingreso Medio"
+                                          : criterion.column}{" "}
+                                ({criterion.direction === "asc" ? "Ascendente" : "Descendente"})
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : (
+                        <p className="text-sm text-gray-500">No hay criterios de ordenamiento definidos.</p>
+                      )}
+                    </div>
+                    <DialogFooter>
+                      <Button type="button" onClick={() => setSaveConfigDialogOpen(false)} variant="outline">
+                        Cancelar
+                      </Button>
+                      <Button
+                        type="button"
+                        onClick={saveCurrentSortConfig}
+                        disabled={!newConfigName.trim() || sortCriteria.length === 0}
+                      >
+                        Guardar
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+                {/* Diálogo para cargar configuración */}
+                <Dialog open={loadConfigDialogOpen} onOpenChange={setLoadConfigDialogOpen}>
+                  <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                      <DialogTitle>Cargar configuración de ordenamiento</DialogTitle>
+                      <DialogDescription>
+                        Selecciona una configuración guardada para aplicarla a los datos actuales.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="grid gap-4 py-4">
+                      {savedSortConfigs.length > 0 ? (
+                        <div className="max-h-[300px] overflow-y-auto">
+                          {savedSortConfigs.map((config) => (
+                            <div
+                              key={config.id}
+                              className="flex justify-between items-center p-3 border rounded-md mb-2 hover:bg-gray-50 cursor-pointer"
+                              onClick={() => loadSortConfig(config.id)}
+                            >
+                              <div>
+                                <p className="font-medium">{config.name}</p>
+                                <p className="text-xs text-gray-500">
+                                  {config.criteria.length} criterio(s) • Creado para: {config.searchType}
+                                </p>
+                              </div>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={(e) => deleteSortConfig(config.id, e)}
+                                className="h-8 w-8 p-0"
+                              >
+                                <span className="sr-only">Eliminar</span>
+                                <svg
+                                  xmlns="http://www.w3.org/2000/svg"
+                                  width="16"
+                                  height="16"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  className="lucide lucide-trash-2"
+                                >
+                                  <path d="M3 6h18"></path>
+                                  <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
+                                  <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
+                                  <line x1="10" x2="10" y1="11" y2="17"></line>
+                                  <line x1="14" x2="14" y1="11" y2="17"></line>
+                                </svg>
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-center py-4 text-gray-500">No hay configuraciones guardadas.</p>
+                      )}
+                    </div>
+                    <DialogFooter>
+                      <Button type="button" onClick={() => setLoadConfigDialogOpen(false)} variant="outline">
+                        Cancelar
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
                 <div className="rounded-md border overflow-hidden">
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Ciudad</TableHead>
-                        <TableHead className="text-right">Población Mexicana</TableHead>
-                        <TableHead className="text-right">% del Total</TableHead>
-                        <TableHead className="text-right">Ingreso Medio</TableHead>
+                        <TableHead
+                          onClick={(e) => handleSort("name", e.shiftKey)}
+                          className="cursor-pointer hover:bg-gray-100"
+                        >
+                          Ciudad
+                          {sortCriteria.findIndex((c) => c.column === "name") >= 0 && (
+                            <span className="ml-1">
+                              {sortCriteria[sortCriteria.findIndex((c) => c.column === "name")].direction === "asc"
+                                ? "↑"
+                                : "↓"}
+                              {sortCriteria.length > 1 && (
+                                <sup className="text-xs font-bold">
+                                  {sortCriteria.findIndex((c) => c.column === "name") + 1}
+                                </sup>
+                              )}
+                            </span>
+                          )}
+                        </TableHead>
+                        <TableHead
+                          onClick={(e) => handleSort("population", e.shiftKey)}
+                          className="text-right cursor-pointer hover:bg-gray-100"
+                        >
+                          Población Mexicana
+                          {sortCriteria.findIndex((c) => c.column === "population") >= 0 && (
+                            <span className="ml-1">
+                              {sortCriteria[sortCriteria.findIndex((c) => c.column === "population")].direction ===
+                              "asc"
+                                ? "↑"
+                                : "↓"}
+                              {sortCriteria.length > 1 && (
+                                <sup className="text-xs font-bold">
+                                  {sortCriteria.findIndex((c) => c.column === "population") + 1}
+                                </sup>
+                              )}
+                            </span>
+                          )}
+                        </TableHead>
+                        <TableHead
+                          onClick={(e) => handleSort("percentage", e.shiftKey)}
+                          className="text-right cursor-pointer hover:bg-gray-100"
+                        >
+                          % del Total
+                          {sortCriteria.findIndex((c) => c.column === "percentage") >= 0 && (
+                            <span className="ml-1">
+                              {sortCriteria[sortCriteria.findIndex((c) => c.column === "percentage")].direction ===
+                              "asc"
+                                ? "↑"
+                                : "↓"}
+                              {sortCriteria.length > 1 && (
+                                <sup className="text-xs font-bold">
+                                  {sortCriteria.findIndex((c) => c.column === "percentage") + 1}
+                                </sup>
+                              )}
+                            </span>
+                          )}
+                        </TableHead>
+                        <TableHead
+                          onClick={(e) => handleSort("income", e.shiftKey)}
+                          className="text-right cursor-pointer hover:bg-gray-100"
+                        >
+                          Ingreso Medio
+                          {sortCriteria.findIndex((c) => c.column === "income") >= 0 && (
+                            <span className="ml-1">
+                              {sortCriteria[sortCriteria.findIndex((c) => c.column === "income")].direction === "asc"
+                                ? "↑"
+                                : "↓"}
+                              {sortCriteria.length > 1 && (
+                                <sup className="text-xs font-bold">
+                                  {sortCriteria.findIndex((c) => c.column === "income") + 1}
+                                </sup>
+                              )}
+                            </span>
+                          )}
+                        </TableHead>
                         <TableHead></TableHead>
                       </TableRow>
                     </TableHeader>

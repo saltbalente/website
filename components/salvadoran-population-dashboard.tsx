@@ -19,6 +19,8 @@ import type { LocationData } from "@/types/census"
 import { ApiKeyConfig } from "@/components/api-key-config"
 import { getSalvadoranBackupData } from "@/lib/salvadoran-backup-data"
 import { SalvadoranComparisonCharts } from "@/components/salvadoran-comparison-charts"
+// Importar el nuevo componente de filtro avanzado
+import { SalvadoranAdvancedFilter } from "@/components/salvadoran-advanced-filter"
 
 export function SalvadoranPopulationDashboard() {
   const [searchTerm, setSearchTerm] = useState("")
@@ -35,6 +37,8 @@ export function SalvadoranPopulationDashboard() {
   const [showSpecificSearch, setShowSpecificSearch] = useState(false)
   const [showApiConfig, setShowApiConfig] = useState(false)
   const [apiKey, setApiKey] = useState<string | null>(null)
+  // Añadir un nuevo estado para los datos filtrados por el filtro avanzado
+  const [advancedFilteredData, setAdvancedFilteredData] = useState<LocationData[]>([])
 
   useEffect(() => {
     const loadInitialData = async () => {
@@ -71,9 +75,10 @@ export function SalvadoranPopulationDashboard() {
     loadInitialData()
   }, [])
 
+  // Modificar el useEffect que aplica filtros para incluir el filtro avanzado
   useEffect(() => {
     // Aplicar filtros de búsqueda y demográficos
-    let filtered = populationData
+    let filtered = [...populationData] // Crear una copia para evitar mutaciones
 
     // Filtrar por término de búsqueda
     if (searchTerm.trim() !== "") {
@@ -87,8 +92,27 @@ export function SalvadoranPopulationDashboard() {
     // Aplicar filtros demográficos
     filtered = applyDemographicFilters(filtered, demographicFilters)
 
-    setFilteredData(filtered)
-  }, [searchTerm, populationData, demographicFilters])
+    // Si hay datos del filtro avanzado y son diferentes de los datos actuales,
+    // usar esos datos en lugar de aplicar los filtros básicos
+    if (advancedFilteredData.length > 0) {
+      // Aplicar solo los filtros de búsqueda y demográficos a los datos ya filtrados por el filtro avanzado
+      let advancedFiltered = [...advancedFilteredData]
+
+      if (searchTerm.trim() !== "") {
+        advancedFiltered = advancedFiltered.filter(
+          (location) =>
+            location.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            location.state.toLowerCase().includes(searchTerm.toLowerCase()),
+        )
+      }
+
+      advancedFiltered = applyDemographicFilters(advancedFiltered, demographicFilters)
+
+      setFilteredData(advancedFiltered)
+    } else {
+      setFilteredData(filtered)
+    }
+  }, [searchTerm, populationData, demographicFilters, advancedFilteredData])
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
@@ -109,6 +133,14 @@ export function SalvadoranPopulationDashboard() {
 
   const handleApiKeyChange = (newApiKey: string) => {
     setApiKey(newApiKey)
+  }
+
+  // Añadir un manejador para el filtro avanzado
+  const handleAdvancedFilterChange = (filteredData: LocationData[]) => {
+    // Solo actualizar si los datos son diferentes
+    if (JSON.stringify(filteredData) !== JSON.stringify(advancedFilteredData)) {
+      setAdvancedFilteredData(filteredData)
+    }
   }
 
   return (
@@ -162,6 +194,15 @@ export function SalvadoranPopulationDashboard() {
             </div>
             <Button type="submit">Buscar</Button>
           </form>
+
+          {/* Añadir el componente de filtro avanzado aquí */}
+          <div className="mt-4">
+            <SalvadoranAdvancedFilter
+              data={populationData}
+              onFilterChange={handleAdvancedFilterChange}
+              maxPopulation={Math.max(...populationData.map((item) => item.population), 0)}
+            />
+          </div>
 
           <div>
             <h3 className="text-sm font-medium mb-3">Filtros Demográficos</h3>
