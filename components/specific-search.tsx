@@ -172,6 +172,13 @@ export function SpecificSearch() {
   // Por esta estructura:
   const [sortCriteria, setSortCriteria] = useState<Array<{ column: string; direction: "asc" | "desc" }>>([])
 
+  // Primero, necesitamos añadir estados para controlar el ordenamiento
+  // Busca la sección donde se declaran los estados del componente y añade:
+
+  // Añadir después de las declaraciones de estado existentes:
+  const [sortColumn, setSortColumn] = useState<string | null>(null)
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc")
+
   // Validar código postal
   const validateZipCode = (zip: string): boolean => {
     return /^\d{5}$/.test(zip)
@@ -1020,7 +1027,7 @@ export function SpecificSearch() {
   }
 
   // Modifiquemos la función handleSort para manejar múltiples columnas:
-  const handleSort = (column: string, isMultiSort = false) => {
+  const handleSortMultiColumn = (column: string, isMultiSort = false) => {
     // Crear una copia del array de criterios actual
     let newSortCriteria = [...sortCriteria]
 
@@ -1341,6 +1348,93 @@ export function SpecificSearch() {
     localStorage.setItem("sortConfigurations", JSON.stringify(updatedConfigs))
   }
 
+  // Ahora, añadamos la función para manejar el ordenamiento
+  // Busca la sección donde se declaran las funciones del componente y añade:
+
+  // Añadir después de las funciones existentes:
+  // const handleSort = (column: string) => {
+  //   // Si se hace clic en la misma columna, invertir la dirección
+  //   if (sortColumn === column) {
+  //     setSortDirection(sortDirection === "asc" ? "desc" : "asc")
+  //   } else {
+  //     // Si se hace clic en una nueva columna, establecerla como columna de ordenamiento
+  //     // y establecer la dirección a descendente por defecto
+  //     setSortColumn(column)
+  //     setSortDirection("desc")
+  //   }
+
+  //   // Ordenar los datos según la columna y dirección seleccionadas
+  //   let sortedData
+
+  //   if (searchType === "state") {
+  //     sortedData = [...stateCitiesResults]
+  //     if (column === "name") {
+  //       sortedData.sort((a, b) =>
+  //         sortDirection === "asc" ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name),
+  //       )
+  //     } else if (column === "population") {
+  //       sortedData.sort((a, b) =>
+  //         sortDirection === "asc" ? a.mexicanPopulation - b.mexicanPopulation : b.mexicanPopulation - a.mexicanPopulation,
+  //       )
+  //     } else if (column === "percentage") {
+  //       sortedData.sort((a, b) =>
+  //         sortDirection === "asc" ? a.percentage - b.percentage : b.percentage - a.percentage,
+  //       )
+  //     } else if (column === "income") {
+  //       sortedData.sort((a, b) =>
+  //         sortDirection === "asc" ? a.medianIncome - b.medianIncome : b.medianIncome - a.medianIncome,
+  //       )
+  //     }
+  //     setStateCitiesResults(sortedData)
+  //   } else if (searchType === "topCities") {
+  //     sortedData = [...topCitiesResults]
+  //     // Aplicar lógica similar para topCitiesResults
+  //     if (column === "name") {
+  //       sortedData.sort((a, b) =>
+  //         sortDirection === "asc" ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name),
+  //       )
+  //     } else if (column === "state") {
+  //       sortedData.sort((a, b) =>
+  //         sortDirection === "asc" ? a.stateName.localeCompare(b.stateName) : b.stateName.localeCompare(a.stateName),
+  //       )
+  //     } else if (column === "population") {
+  //       sortedData.sort((a, b) =>
+  //         sortDirection === "asc" ? a.mexicanPopulation - b.mexicanPopulation : b.mexicanPopulation - a.mexicanPopulation,
+  //       )
+  //     } else if (column === "percentage") {
+  //       sortedData.sort((a, b) =>
+  //         sortDirection === "asc" ? a.percentage - b.percentage : b.percentage - a.percentage,
+  //       )
+  //     } else if (column === "income") {
+  //       sortedData.sort((a, b) =>
+  //         sortDirection === "asc" ? a.medianIncome - b.medianIncome : b.medianIncome - a.medianIncome,
+  //       )
+  //     }
+  //     setTopCitiesResults(sortedData)
+  //   } else if (searchType === "advancedFilter") {
+  //     sortedData = [...filteredCities]
+  //     // Aplicar lógica similar para filteredCities
+  //     if (column === "name") {
+  //       sortedData.sort((a, b) =>
+  //         sortDirection === "asc" ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name),
+  //       )
+  //     } else if (column === "population") {
+  //       sortedData.sort((a, b) =>
+  //         sortDirection === "asc" ? a.mexicanPopulation - b.mexicanPopulation : b.mexicanPopulation - a.mexicanPopulation,
+  //       )
+  //     } else if (column === "percentage") {
+  //       sortedData.sort((a, b) =>
+  //         sortDirection === "asc" ? a.percentage - b.percentage : b.percentage - a.percentage,
+  //       )
+  //     } else if (column === "income") {
+  //       sortedData.sort((a, b) =>
+  //         sortDirection === "asc" ? a.medianIncome - b.medianIncome : b.medianIncome - a.medianIncome,
+  //       )
+  //     }
+  //     setFilteredCities(sortedData)
+  //   }
+  // }
+
   // Declare the missing functions
   const renderCityDetails = (data: any) => {
     if (!data) return null
@@ -1363,10 +1457,60 @@ export function SpecificSearch() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Ciudad</TableHead>
-                <TableHead>Población Mexicana</TableHead>
-                <TableHead>Porcentaje</TableHead>
-                <TableHead>Ingreso Medio</TableHead>
+                <TableHead
+                  className="cursor-pointer hover:bg-gray-100"
+                  onClick={(e) => handleSortMultiColumn("name", e.shiftKey)}
+                >
+                  Ciudad{" "}
+                  {sortCriteria.findIndex((c) => c.column === "name") >= 0 &&
+                    (sortCriteria[sortCriteria.findIndex((c) => c.column === "name")].direction === "asc" ? "↑" : "↓")}
+                  {sortCriteria.length > 1 && sortCriteria.findIndex((c) => c.column === "name") >= 0 && (
+                    <sup className="text-xs font-bold">{sortCriteria.findIndex((c) => c.column === "name") + 1}</sup>
+                  )}
+                </TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-gray-100"
+                  onClick={(e) => handleSortMultiColumn("population", e.shiftKey)}
+                >
+                  Población Mexicana{" "}
+                  {sortCriteria.findIndex((c) => c.column === "population") >= 0 &&
+                    (sortCriteria[sortCriteria.findIndex((c) => c.column === "population")].direction === "asc"
+                      ? "↑"
+                      : "↓")}
+                  {sortCriteria.length > 1 && sortCriteria.findIndex((c) => c.column === "population") >= 0 && (
+                    <sup className="text-xs font-bold">
+                      {sortCriteria.findIndex((c) => c.column === "population") + 1}
+                    </sup>
+                  )}
+                </TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-gray-100"
+                  onClick={(e) => handleSortMultiColumn("percentage", e.shiftKey)}
+                >
+                  % del Total{" "}
+                  {sortCriteria.findIndex((c) => c.column === "percentage") >= 0 &&
+                    (sortCriteria[sortCriteria.findIndex((c) => c.column === "percentage")].direction === "asc"
+                      ? "↑"
+                      : "↓")}
+                  {sortCriteria.length > 1 && sortCriteria.findIndex((c) => c.column === "percentage") >= 0 && (
+                    <sup className="text-xs font-bold">
+                      {sortCriteria.findIndex((c) => c.column === "percentage") + 1}
+                    </sup>
+                  )}
+                </TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-gray-100"
+                  onClick={(e) => handleSortMultiColumn("income", e.shiftKey)}
+                >
+                  Ingreso Medio{" "}
+                  {sortCriteria.findIndex((c) => c.column === "income") >= 0 &&
+                    (sortCriteria[sortCriteria.findIndex((c) => c.column === "income")].direction === "asc"
+                      ? "↑"
+                      : "↓")}
+                  {sortCriteria.length > 1 && sortCriteria.findIndex((c) => c.column === "income") >= 0 && (
+                    <sup className="text-xs font-bold">{sortCriteria.findIndex((c) => c.column === "income") + 1}</sup>
+                  )}
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -1394,11 +1538,71 @@ export function SpecificSearch() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Ciudad</TableHead>
-                <TableHead>Estado</TableHead>
-                <TableHead>Población Mexicana</TableHead>
-                <TableHead>Porcentaje</TableHead>
-                <TableHead>Ingreso Medio</TableHead>
+                <TableHead
+                  className="cursor-pointer hover:bg-gray-100"
+                  onClick={(e) => handleSortMultiColumn("name", e.shiftKey)}
+                >
+                  Ciudad{" "}
+                  {sortCriteria.findIndex((c) => c.column === "name") >= 0 &&
+                    (sortCriteria[sortCriteria.findIndex((c) => c.column === "name")].direction === "asc" ? "↑" : "↓")}
+                  {sortCriteria.length > 1 && sortCriteria.findIndex((c) => c.column === "name") >= 0 && (
+                    <sup className="text-xs font-bold">{sortCriteria.findIndex((c) => c.column === "name") + 1}</sup>
+                  )}
+                </TableHead>
+                <TableHead
+                  className="cursor-pointer hover:bg-gray-100"
+                  onClick={(e) => handleSortMultiColumn("state", e.shiftKey)}
+                >
+                  Estado{" "}
+                  {sortCriteria.findIndex((c) => c.column === "state") >= 0 &&
+                    (sortCriteria[sortCriteria.findIndex((c) => c.column === "state")].direction === "asc" ? "↑" : "↓")}
+                  {sortCriteria.length > 1 && sortCriteria.findIndex((c) => c.column === "state") >= 0 && (
+                    <sup className="text-xs font-bold">{sortCriteria.findIndex((c) => c.column === "state") + 1}</sup>
+                  )}
+                </TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-gray-100"
+                  onClick={(e) => handleSortMultiColumn("population", e.shiftKey)}
+                >
+                  Población Mexicana{" "}
+                  {sortCriteria.findIndex((c) => c.column === "population") >= 0 &&
+                    (sortCriteria[sortCriteria.findIndex((c) => c.column === "population")].direction === "asc"
+                      ? "↑"
+                      : "↓")}
+                  {sortCriteria.length > 1 && sortCriteria.findIndex((c) => c.column === "population") >= 0 && (
+                    <sup className="text-xs font-bold">
+                      {sortCriteria.findIndex((c) => c.column === "population") + 1}
+                    </sup>
+                  )}
+                </TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-gray-100"
+                  onClick={(e) => handleSortMultiColumn("percentage", e.shiftKey)}
+                >
+                  % del Total{" "}
+                  {sortCriteria.findIndex((c) => c.column === "percentage") >= 0 &&
+                    (sortCriteria[sortCriteria.findIndex((c) => c.column === "percentage")].direction === "asc"
+                      ? "↑"
+                      : "↓")}
+                  {sortCriteria.length > 1 && sortCriteria.findIndex((c) => c.column === "percentage") >= 0 && (
+                    <sup className="text-xs font-bold">
+                      {sortCriteria.findIndex((c) => c.column === "percentage") + 1}
+                    </sup>
+                  )}
+                </TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-gray-100"
+                  onClick={(e) => handleSortMultiColumn("income", e.shiftKey)}
+                >
+                  Ingreso Medio{" "}
+                  {sortCriteria.findIndex((c) => c.column === "income") >= 0 &&
+                    (sortCriteria[sortCriteria.findIndex((c) => c.column === "income")].direction === "asc"
+                      ? "↑"
+                      : "↓")}
+                  {sortCriteria.length > 1 && sortCriteria.findIndex((c) => c.column === "income") >= 0 && (
+                    <sup className="text-xs font-bold">{sortCriteria.findIndex((c) => c.column === "income") + 1}</sup>
+                  )}
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -1427,11 +1631,73 @@ export function SpecificSearch() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Estado</TableHead>
-                <TableHead>Población Mexicana</TableHead>
-                <TableHead>Porcentaje</TableHead>
-                <TableHead>Ingreso Medio</TableHead>
-                <TableHead>Número de Ciudades</TableHead>
+                <TableHead
+                  className="cursor-pointer hover:bg-gray-100"
+                  onClick={(e) => handleSortMultiColumn("state", e.shiftKey)}
+                >
+                  Estado{" "}
+                  {sortCriteria.findIndex((c) => c.column === "state") >= 0 &&
+                    (sortCriteria[sortCriteria.findIndex((c) => c.column === "state")].direction === "asc" ? "↑" : "↓")}
+                  {sortCriteria.length > 1 && sortCriteria.findIndex((c) => c.column === "state") >= 0 && (
+                    <sup className="text-xs font-bold">{sortCriteria.findIndex((c) => c.column === "state") + 1}</sup>
+                  )}
+                </TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-gray-100"
+                  onClick={(e) => handleSortMultiColumn("population", e.shiftKey)}
+                >
+                  Población Mexicana{" "}
+                  {sortCriteria.findIndex((c) => c.column === "population") >= 0 &&
+                    (sortCriteria[sortCriteria.findIndex((c) => c.column === "population")].direction === "asc"
+                      ? "↑"
+                      : "↓")}
+                  {sortCriteria.length > 1 && sortCriteria.findIndex((c) => c.column === "population") >= 0 && (
+                    <sup className="text-xs font-bold">
+                      {sortCriteria.findIndex((c) => c.column === "population") + 1}
+                    </sup>
+                  )}
+                </TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-gray-100"
+                  onClick={(e) => handleSortMultiColumn("percentage", e.shiftKey)}
+                >
+                  % del Total{" "}
+                  {sortCriteria.findIndex((c) => c.column === "percentage") >= 0 &&
+                    (sortCriteria[sortCriteria.findIndex((c) => c.column === "percentage")].direction === "asc"
+                      ? "↑"
+                      : "↓")}
+                  {sortCriteria.length > 1 && sortCriteria.findIndex((c) => c.column === "percentage") >= 0 && (
+                    <sup className="text-xs font-bold">
+                      {sortCriteria.findIndex((c) => c.column === "percentage") + 1}
+                    </sup>
+                  )}
+                </TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-gray-100"
+                  onClick={(e) => handleSortMultiColumn("income", e.shiftKey)}
+                >
+                  Ingreso Medio{" "}
+                  {sortCriteria.findIndex((c) => c.column === "income") >= 0 &&
+                    (sortCriteria[sortCriteria.findIndex((c) => c.column === "income")].direction === "asc"
+                      ? "↑"
+                      : "↓")}
+                  {sortCriteria.length > 1 && sortCriteria.findIndex((c) => c.column === "income") >= 0 && (
+                    <sup className="text-xs font-bold">{sortCriteria.findIndex((c) => c.column === "income") + 1}</sup>
+                  )}
+                </TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-gray-100"
+                  onClick={(e) => handleSortMultiColumn("cities", e.shiftKey)}
+                >
+                  Número de Ciudades{" "}
+                  {sortCriteria.findIndex((c) => c.column === "cities") >= 0 &&
+                    (sortCriteria[sortCriteria.findIndex((c) => c.column === "cities")].direction === "asc"
+                      ? "↑"
+                      : "↓")}
+                  {sortCriteria.length > 1 && sortCriteria.findIndex((c) => c.column === "cities") >= 0 && (
+                    <sup className="text-xs font-bold">{sortCriteria.findIndex((c) => c.column === "cities") + 1}</sup>
+                  )}
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -1877,7 +2143,7 @@ export function SpecificSearch() {
                     </DialogContent>
                   </Dialog>
                 </div>
-                // Añadir este elemento informativo antes de la tabla
+                {/* Añadir este elemento informativo antes de la tabla */}
                 <div className="text-xs text-gray-500 mb-2">
                   Haz clic en un encabezado para ordenar. Mantén presionada la tecla Shift mientras haces clic para
                   ordenar por múltiples columnas.
@@ -2034,7 +2300,7 @@ export function SpecificSearch() {
                     <TableHeader>
                       <TableRow>
                         <TableHead
-                          onClick={(e) => handleSort("name", e.shiftKey)}
+                          onClick={(e) => handleSortMultiColumn("name", e.shiftKey)}
                           className="cursor-pointer hover:bg-gray-100"
                         >
                           Ciudad
@@ -2052,7 +2318,7 @@ export function SpecificSearch() {
                           )}
                         </TableHead>
                         <TableHead
-                          onClick={(e) => handleSort("population", e.shiftKey)}
+                          onClick={(e) => handleSortMultiColumn("population", e.shiftKey)}
                           className="text-right cursor-pointer hover:bg-gray-100"
                         >
                           Población Mexicana
@@ -2071,7 +2337,7 @@ export function SpecificSearch() {
                           )}
                         </TableHead>
                         <TableHead
-                          onClick={(e) => handleSort("percentage", e.shiftKey)}
+                          onClick={(e) => handleSortMultiColumn("percentage", e.shiftKey)}
                           className="text-right cursor-pointer hover:bg-gray-100"
                         >
                           % del Total
@@ -2090,7 +2356,7 @@ export function SpecificSearch() {
                           )}
                         </TableHead>
                         <TableHead
-                          onClick={(e) => handleSort("income", e.shiftKey)}
+                          onClick={(e) => handleSortMultiColumn("income", e.shiftKey)}
                           className="text-right cursor-pointer hover:bg-gray-100"
                         >
                           Ingreso Medio
