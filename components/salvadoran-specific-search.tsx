@@ -138,6 +138,10 @@ export function SalvadoranSpecificSearch() {
   // Estado para la paginación de barrios
   const [currentNeighborhoodPage, setCurrentNeighborhoodPage] = useState(1)
 
+  // Estados para el ordenamiento de tablas
+  const [sortColumn, setSortColumn] = useState<string | null>(null)
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc")
+
   // Validar código postal
   const validateZipCode = (zip: string): boolean => {
     return /^\d{5}$/.test(zip)
@@ -1107,6 +1111,36 @@ export function SalvadoranSpecificSearch() {
     }
   }
 
+  // Función para manejar el ordenamiento al hacer clic en los encabezados de columna
+  const handleSort = (column: string) => {
+    if (sortColumn === column) {
+      // Si ya estamos ordenando por esta columna, cambiar la dirección
+      setSortDirection(sortDirection === "asc" ? "desc" : "asc")
+    } else {
+      // Si es una nueva columna, establecerla como columna de ordenamiento y dirección descendente por defecto
+      setSortColumn(column)
+      setSortDirection("desc")
+    }
+
+    // Aplicar el ordenamiento a los datos
+    if (stateCitiesResults.length > 0) {
+      const sortedData = [...stateCitiesResults].sort((a, b) => {
+        const valueA = a[column]
+        const valueB = b[column]
+
+        // Para strings, usar localeCompare
+        if (typeof valueA === "string" && typeof valueB === "string") {
+          return sortDirection === "asc" ? valueA.localeCompare(valueB) : valueB.localeCompare(valueA)
+        }
+
+        // Para números
+        return sortDirection === "asc" ? valueA - valueB : valueB - valueA
+      })
+
+      setStateCitiesResults(sortedData)
+    }
+  }
+
   // Función para exportar los datos seleccionados a un archivo CSV
   const exportCityData = () => {
     if (stateCitiesResults.length === 0) return
@@ -1306,10 +1340,27 @@ export function SalvadoranSpecificSearch() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Ciudad</TableHead>
-                <TableHead className="text-right">Población Salvadoreña</TableHead>
-                <TableHead className="text-right">% del Total</TableHead>
-                <TableHead className="text-right">Ingreso Medio</TableHead>
+                <TableHead className="cursor-pointer hover:bg-gray-100" onClick={() => handleSort("name")}>
+                  Ciudad {sortColumn === "name" && (sortDirection === "asc" ? "↑" : "↓")}
+                </TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-gray-100"
+                  onClick={() => handleSort("salvadoranPopulation")}
+                >
+                  Población Salvadoreña {sortColumn === "salvadoranPopulation" && (sortDirection === "asc" ? "↑" : "↓")}
+                </TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-gray-100"
+                  onClick={() => handleSort("percentage")}
+                >
+                  % del Total {sortColumn === "percentage" && (sortDirection === "asc" ? "↑" : "↓")}
+                </TableHead>
+                <TableHead
+                  className="text-right cursor-pointer hover:bg-gray-100"
+                  onClick={() => handleSort("medianIncome")}
+                >
+                  Ingreso Medio {sortColumn === "medianIncome" && (sortDirection === "asc" ? "↑" : "↓")}
+                </TableHead>
                 <TableHead></TableHead>
               </TableRow>
             </TableHeader>
