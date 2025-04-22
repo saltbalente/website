@@ -113,8 +113,8 @@ export function MexicanPopulationDashboard() {
   return (
     <div className="container mx-auto py-8 px-4">
       <header className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Análisis Demográfico Mexicano en EE.UU.</h1>
-        <p className="text-gray-600">
+        <h1 className="text-3xl font-bold text-white mb-2">Análisis Demográfico Mexicano en EE.UU.</h1>
+        <p className="text-gray-300">
           Datos demográficos de la población mexicana en Estados Unidos basados en el U.S. Census Bureau
         </p>
       </header>
@@ -256,21 +256,21 @@ export function MexicanPopulationDashboard() {
         <CardContent>
           <div className="space-y-4">
             <div>
-              <h3 className="font-medium text-gray-900">Segmentación por Edad</h3>
-              <p className="text-gray-600">
+              <h3 className="font-medium text-white">Segmentación por Edad</h3>
+              <p className="text-gray-300">
                 Personaliza tus anuncios según el grupo de edad predominante en cada ubicación para maximizar la
                 relevancia.
               </p>
             </div>
             <div>
-              <h3 className="font-medium text-gray-900">Segmentación por Ingresos</h3>
-              <p className="text-gray-600">
+              <h3 className="font-medium text-white">Segmentación por Ingresos</h3>
+              <p className="text-gray-300">
                 Ajusta tus ofertas de productos y servicios según el nivel de ingresos de cada área geográfica.
               </p>
             </div>
             <div>
-              <h3 className="font-medium text-gray-900">Segmentación por Nivel Educativo</h3>
-              <p className="text-gray-600">
+              <h3 className="font-medium text-white">Segmentación por Nivel Educativo</h3>
+              <p className="text-gray-300">
                 Adapta el lenguaje y complejidad de tus anuncios según el nivel educativo predominante en cada
                 ubicación.
               </p>
